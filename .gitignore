@@ -1,0 +1,25 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+main_files/
+main_cache/
+main.tex
+main.pdf
+main.log
+main.aux
+nul
+*.zip
+Raw Data/
+Weather Data/
+Graphics/
+recording/
+Data/OD_data.rds
+Data/all_OD_data.rds
+Data/facet_plot_data.rds
+Data/d_2017.rds
+Data/d_2018.rds
+Data/d_2019.rds
+Data/d_2020.rds
+Data/d_2021.rds
+Data/d_2022.rds

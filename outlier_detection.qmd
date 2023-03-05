@@ -1,0 +1,517 @@
+# Detecting outliers within a cluster of stations {#sec-outliers_method}
+
+To demonstrate the outlier detection procedure, we focus on one of the resulting clusters. The nine stations in the cluster we consider are highlighted in green in @fig-mst_zoom. 
+
+@fig-mst_zoom demonstrates how the currently analysed cluster may be highlighted for analysts. On the one hand, the location of the cluster within the D.C. area can provide contextual information for analysts in the search for an explanation of outlier demand. On the other hand, the zoomed in section on the right shows how the stations relate to one another within the cluster. This could be useful if the outlier demand is not detected in all stations. For example, all but one of the green cluster stations lie in a relatively straight line. If the station which lies to the North East of the main group of stations in the cluster behaves differently, analysts can look to nearby clusters for further information.
+
+```{r}
+#| label: fig-mst_zoom
+#| fig-cap: Cluster chosen for further investigation. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| fig-width: 6
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+input_mat <- adj_mat * (1 - cor_mat)
+clusters <- mst_clustering_threshold(input_mat, corr_threshold = 0)
+station_colour <- numeric(length = nrow(station_data))
+for (i in 1:nrow(station_data)) {
+  k <- 1:length(clusters$cluster_list)
+  station_colour[i] <- as.character(which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE))
+}
+station_data$station_colour <- station_colour
+d14 <- station_data[which(station_data$station_colour == 14), ]
+state <- map_data("state")
+p1 <- ggplot() +
+  geom_polygon(
+    data = state, aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = FALSE) +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  geom_point(
+    data = station_data, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "grey", pch = 19, size = 0.4
+  ) +
+  geom_point(
+    data = d14, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "green3", pch = 19, size = 0.4
+  ) +
+  geom_segment(aes(x = -77.11, xend = -77.04, y = 38.93, yend = 38.93), colour = "black") +
+  geom_segment(aes(x = -77.04, xend = -77.11, y = 38.98, yend = 38.98), colour = "black") +
+  geom_segment(aes(x = -77.11, xend = -77.11, y = 38.93, yend = 38.98), colour = "black") +
+  geom_segment(aes(x = -77.04, xend = -77.04, y = 38.93, yend = 38.98), colour = "black") +
+  annotate("text", x = -76.9, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.3, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_blank(),
+    legend.position = "none",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = unit(c(0.3, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank()
+  )
+p2 <- ggplot() +
+  geom_polygon(
+    data = state,
+    aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = FALSE) +
+  coord_fixed(1.3, xlim = c(-77.11, -77.04), ylim = c(38.93, 38.98), expand = FALSE) +
+  geom_point(
+    data = station_data,
+    aes(x = LONGITUDE, y = LATITUDE),
+    colour = "grey", pch = 19, size = 3
+  ) +
+  geom_point(
+    data = d14, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "green3", pch = 19, size = 3
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_blank(),
+    legend.position = "none",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = unit(c(0, 0.3, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1)
+q <- ggdraw(p) +
+  draw_line(x = c(0.245, 0.505), y = c(0.60, 0.94), color = "black", size = 0.5) +
+  draw_line(x = c(0.245, 0.505), y = c(0.495, 0.07), color = "black", size = 0.5)
+q
+```
+
+To identify outlier demand in usage patterns, we use the notion of *statistical depth*. In statistics, depth provides an ordering of observations, where those near the centre of the distribution have higher depth and those far from the centre have lower depth. In the case where each observation is a time series of usage throughout the day, the *functional depth* can measure how close to the central trajectory, i.e. median usage pattern, each daily usage pattern is. Therefore, to measure the outlyingness of each daily usage pattern, we calculate its functional depth (with respect to other daily usage patterns that lie in the same partition of data). Days whose usage pattern has lower functional depth are more outlying. In particular, if the depth is below some threshold, we classify the day as an outlier.
+
+For each partition of data, $p$, and for each station $s$, we calculate a threshold, $C_{s,p}$, for the functional depth as per @Febrero2008. To calculate the threshold, we (i) resample the daily usage patterns with probability proportional to their functional depths (such that any usage patterns affected by outlier demand are less likely to be resampled), (ii) smooth the resampled patterns, and (iii) sets the threshold $C_{s,p}$ as the median of the $1^{st}$ percentile of the functional depths of the resampled patterns. 
+
+```{r}
+#| label: fig-diffs
+#| fig-cap: Normalisation of the functional depths, exemplified for station 31316 where there are two partitions of data (summer/winter). Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+d1 <- agg_station_matrix[[245]]
+d2 <- agg_station_matrix[[238]]
+d3 <- agg_station_matrix[[239]]
+d4 <- agg_station_matrix[[244]]
+d5 <- agg_station_matrix[[233]]
+d6 <- agg_station_matrix[[246]]
+d7 <- agg_station_matrix[[248]]
+d8 <- agg_station_matrix[[442]]
+d9 <- agg_station_matrix[[467]]
+summer <- c("April", "May", "June", "July", "August", "September", "October")
+winter <- c("November", "December", "January", "February", "March")
+d5_s <- d5[which(months(d5$date_of_day) %in% summer), ]
+d5_w <- d5[which(months(d5$date_of_day) %in% winter), ]
+res5_s <- residuals_function(d5_s, c(1, 1, 1))
+res5_w <- residuals_function(d5_w, c(1, 1, 1))
+depths5_s <- mfd(
+  array(t(res5_s[, 2:25]),
+    dim = c(ncol(res5_s[, 2:25]), nrow(res5_s[, 2:25]), 1)
+  ),
+  time = 0:23, type = "projdepth"
+)$MFDdepthZ
+c5_s <- depth_threshold(res5_s[, 2:25], perc = 0.01)
+dates5_s <- as.Date(res5_s$date_of_day, origin = "1970-01-01")
+depths5_w <- mfd(
+  array(t(res5_w[, 2:25]),
+    dim = c(ncol(res5_w[, 2:25]), nrow(res5_w[, 2:25]), 1)
+  ),
+  time = 0:23, type = "projdepth"
+)$MFDdepthZ
+c5_w <- depth_threshold(res5_w[, 2:25], perc = 0.01)
+dates5_w <- as.Date(res5_w$date_of_day, origin = "1970-01-01")
+df5 <- data.frame(depths5 = c(depths5_s, depths5_w), dates5 = c(dates5_s, dates5_w))
+df5 <- df5[order(df5$dates5), ]
+df5$obs5 <- 1:nrow(df5)
+p5 <- ggplot(df5, aes(x = obs5, y = depths5, group = 1)) +
+  geom_segment(aes(x = obs5, xend = obs5, y = 0.3, yend = depths5),
+    colour = alpha("#80b1d3", 0.5), size = 0.2
+  ) +
+  geom_point(size = 0.3) +
+  ylab("Functional depths") +
+  ylim(0.3, 0.8) +
+  labs(caption = "(a) Functional depths") +
+  scale_x_continuous(
+    name = "",
+    breaks = c(
+      df5$obs5[which(df5$dates5 == "2017-01-01")],
+      df5$obs5[which(df5$dates5 == "2018-01-03")],
+      df5$obs5[which(df5$dates5 == "2019-01-03")]
+    ),
+    labels = c("2017", "2018", "2019")
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+diffs5_s <- (c5_s - depths5_s) / c5_s
+diffs5_w <- (c5_w - depths5_w) / c5_w
+df5 <- data.frame(diffs5 = c(diffs5_s, diffs5_w), dates5 = c(dates5_s, dates5_w))
+df5 <- df5[order(df5$dates5), ]
+df5$obs5 <- 1:nrow(df5)
+p5b <- ggplot(df5, aes(x = obs5, y = diffs5, group = 1)) +
+  geom_segment(aes(x = obs5, xend = obs5, y = 0, yend = diffs5),
+    colour = alpha("#80b1d3", 0.5), size = 0.2
+  ) +
+  geom_point(size = 0.3) +
+  geom_hline(yintercept = 0, col = "red") +
+  ylab("Standardised threshold distances") +
+  ylim(-0.6, 0.2) +
+  coord_cartesian(expand = F) +
+  labs(caption = "(b) Normalised threshold exceedances") +
+  scale_x_continuous(
+    name = "",
+    breaks = c(
+      df5$obs5[which(df5$dates5 == "2017-01-01")],
+      df5$obs5[which(df5$dates5 == "2018-01-03")],
+      df5$obs5[which(df5$dates5 == "2019-01-03")]
+    ),
+    labels = c("2017", "2018", "2019")
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p5, p5b, ncol = 2, nrow = 1, align = "vh")
+p
+```
+
+Let $d_{n,s,p}$ be the functional depth for day $n$ (which occurs in partition $p$) for station $s$. We then transform the functional depths to lie between 0 and 1 such that they are comparable between different stations and aggregated over the different partitions of data. Define $z_{n,s}$ to be the normalised functional depth on day $n$ for station $s$:
+
+\begin{equation}
+    z_{n,s} = \sum_{p=1}^P \left( \mathds{1}_{n \in p}\left( \frac{C_{s,p} - d_{n,s,p}}{C_{s,p}}\right) \right).
+\end{equation}
+
+The functional depths for station 31303 are shown in @fig-diffs(a), and their normalised counterparts in @fig-diffs(b). @fig-diffs(a) provides a way to check for unaccounted for trend and seasonality in the usage patterns. However, much like univariate regression residuals which can be used to visually identify residuals patterns, the functional depths should appear random with no obvious patterns. If an analyst can identify a pattern in the functional depths, this would suggest that the forecasting model may need to be reconsidered. Weekdays could be highlighted in different colours to help identify temporal patterns on a smaller scale. @fig-diffs(b) can also be used by analysts to check how many non-outlier days are close to, but do not exceed, the threshold. Analysts can use this information to manually vary the threshold to detect further outliers they perceive to be false negatives.  
+
+```{r}
+#| label: fig-zn
+#| fig-cap: Sum of threshold exceedances, $z_n$. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+dates <- as.Date(names(exceedances), origin = "1970-01-01")
+exceed_df <- data.frame(exceedances, dates)
+p <- ggplot(exceed_df,
+            aes(x = dates, y = exceedances, group = 1)) +
+  geom_segment(aes(x = dates, xend = dates, y = 0, yend = exceedances),
+    colour = "grey"
+  ) +
+  geom_point(size = 0.7) +
+  geom_hline(yintercept = 0, col = "red") +
+  xlab("") +
+  ylab("Sum of threshold exceedances") +
+  ylim(0, 0.4) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 11, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+We then define the sum of threshold exceedances across all $S$ stations in the cluster to be:
+
+\begin{equation} 
+ z_n = \sum_{s=1}^{S} z_{n,s} \mathds{1}_{\{z_{ns} > 0\}}.
+\end{equation}
+
+The values of $z_{n}$ for this cluster are shown in @fig-zn. The value of $z_n$ is only positive for days which have been classified as an outlier. 
+
+## Computing outlier severity
+Although the values of $z_n$ give an indication of how severe the outlier is (with $z_n$ being larger if the magnitude of the outlier demand is larger, or if it affects a larger number of stations), we wish to make the severity easier to interpret across different clusters. Therefore, we fit a distribution to the sum of threshold exceedances and use the non-exceedance probability given by the CDF of the distribution as a measure of severity.
+
+In contrast to @Rennie2021b who fit a generalised Pareto distribution (GPD) to the sum of threshold exceedances, here we fit a four-parameter Beta distribution [@Carpenter2001]. For a GPD, assuming the shape parameter is non-negative, the support has no upper bound. In this application the upper bound is finite and known to be equal to the number of stations within the cluster. Since $z_{n,s}$ lies between 0 and 1, the sum across $S$ stations must lie between 0 and $S$. Therefore, a four parameter Beta distribution, bounded on $(0,S)$ is likely to provide a better fit -- see @fig-gpd_fit.
+
+```{r}
+#| label: fig-gpd_fit
+#| fig-cap: Comparison of fitted distributions. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+a <- 0
+c <- 9
+t <- as.numeric(exceedances)
+z <- (t - a) / (c - a)
+mu <- mean(z)
+var <- var(z)
+param <- estBetaParams(mu, var)
+exceed_df <- data.frame(exceedances)
+p1 <- ggplot(exceed_df, aes(x = as.numeric(exceedances))) +
+  geom_histogram(aes(y = after_stat(density)),
+    binwidth = 0.04, linewidth = 0.4,
+    colour = "black", fill = "lightgray",
+    position = "identity", center = 0.02
+  ) +
+  xlab(expression("z"[n])) +
+  ylab("Density") +
+  xlim(-0.00001, 1) +
+  ylim(0, 10) +
+  geom_area(
+    stat = "function", fun = dgpd, args = list(mu = 0, sigma = 0.05567, xi = -0.01623),
+    colour = "black", fill = "orange", alpha = 0.4, xlim = c(0, 5)
+  ) +
+  theme_light() +
+  labs(caption = "(a) Fitted Generalised Pareto\ndistribution") +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    axis.line.x = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p2 <- ggplot(exceed_df, aes(x = as.numeric(exceedances))) +
+  geom_histogram(aes(y = after_stat(density)),
+    binwidth = 0.04,
+    linewidth = 0.4, colour = "black", fill = "lightgray",
+    position = "identity", center = 0.02
+  ) +
+  xlab(expression("z"[n])) +
+  ylab("Density") +
+  xlim(0, 1) +
+  ylim(0, 10) +
+  geom_area(stat = "function", fun = dnsbeta, args = list(shape1 = param$alpha, shape2 = param$beta, min = 0, max = 9, log = FALSE), colour = "black", fill = "dodgerblue2", alpha = 0.4, xlim = c(0, 5)) +
+  theme_light() +
+  labs(caption = "(b) Fitted four-parameter\nBeta distribution") +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    axis.line.x = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh")
+p
+```
+
+The severity of an outlier on day $n$, $\theta_n$, is therefore given by the CDF of the four parameter Beta distribution:
+
+\begin{equation} 
+    \theta_n = F_{(\alpha, \beta, a, c)}(z_n) = 
+    \int_{0}^{z_n} \frac{(q)^{\alpha -1} (S - q)^{\beta -1}}{B(\alpha, \beta)S^{\alpha + \beta + 1}} dq,
+\end{equation}
+
+where $B(\alpha, \beta)$ is the Beta function. This results in an outlier severity, between 0 and 1, for each cluster on each day, as exemplified in @tbl-severity.
+
+We differentiate *positive* and *negative* outliers. Positive outliers are primarily caused by increased usage i.e. where the sum of the functional residual is greater than zero, whereas negative outliers indicate a shortfall in usage.
+
+```{r}
+#| label: tbl-severity
+#| tbl-cap: Examples of outlier severities for different days, where arrows indicate positive or negative outliers
+#| tbl-cap-location: bottom
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: false
+#| cache: true
+#| output: asis
+sev_table <- tribble(
+  ~Date, ~`Cluster 1`, ~`Cluster 2`, ~`Cluster 3`, ~`...`,
+  "11/01/2017", "0.033 $\\downarrow$", "-", "-", "$\\hdots$",
+  "12/01/2017", "0.852 $\\uparrow$", "0.720 $\\uparrow$", "-", "$\\hdots$",
+  "$\\vdots$", "$\\vdots$", "$\\vdots$", "$\\vdots$", "$\\ddots$"
+)
+kable(sev_table,
+  "pipe",
+  align = rep("c", 5),
+  escape = FALSE
+)
+```
+
+|    Date    |     Cluster 1      |    Cluster 2     | Cluster 3 |   ...    |
+|:----------:|:------------------:|:----------------:|:---------:|:--------:|
+| 11/01/2017 | 0.033 $\downarrow$ |        -         |     -     | $\hdots$ |
+| 12/01/2017 |  0.852 $\uparrow$  | 0.720 $\uparrow$ |     -     | $\hdots$ |
+|  $\vdots$  |      $\vdots$      |     $\vdots$     | $\vdots$  | $\ddots$ |
+
+: Examples of outlier severities for different days, where arrows indicate positive or negative outliers {#tbl-severity}
+
+## Visualising detected outliers for analysts
+There are multiple different visualisations that could be used to present the information from @tbl-severity to analysts. 
+
+To support on-the-day forecast adjustments, the simplest approach is as a ranked *alert list*, as exemplified by @tbl-alert_list_ch3. By presenting the alert list as a table rather than a visualisation, this gives a clear, prioritised list of tasks to complete. Here, the different colours show where the outlier was detected: \textcolor{red}{red} showing the stations where the outlier was detected, and \textcolor{cyan}{blue} showing other stations in the same cluster likely to be affected. By displaying the severity alongside the ranking, analysts are better able to prioritise their adjustments. For example, an analyst may choose to only adjust the forecasts for the top two outliers in @tbl-alert_list_ch3, as the third has a much lower severity in comparison.
+
+```{r}
+#| label: tbl-alert_list_ch3
+#| tbl-cap: Example of ranked alert list for 30/03/2018
+#| tbl-cap-location: bottom
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: false
+#| cache: true
+#| output: asis
+alert_table <- tribble(
+  ~Rank, ~Severity, ~`Direction of change`, ~Cluster,
+  "1", "0.892", "$\\uparrow$", "\\textcolor{red}{31104, 31115, 31129, 31217, 31219, 31222, $\\hdots$}",
+  "2", "0.828", "$\\uparrow$", "\\textcolor{red}{32008, 32048}",
+  "3", "0.347", "$\\uparrow$", "\\textcolor{red}{31000, }\\textcolor{cyan}{31001, 31002, 31003, 31004, 31005, $\\hdots$}",
+  "$\\vdots$", "$\\vdots$", "$\\vdots$", "$\\vdots$"
+)
+kable(alert_table,
+  "pipe",
+  align = c("c", "c", "c", "l"),
+  escape = FALSE
+)
+```
+
+|   Rank   | Severity | Direction of change |Cluster                                                                               |
+|:--------:|:--------:|:-------------------:|:-------------------------------------------------------------------------------------|
+|    1     |  0.892   |     $\uparrow$      |\textcolor{red}{31104, 31115, 31129, 31217, 31219, 31222, $\hdots$}                   |
+|    2     |  0.828   |     $\uparrow$      |\textcolor{red}{32008, 32048}                                                         |
+|    3     |  0.347   |     $\uparrow$      |\textcolor{red}{31000, }\textcolor{cyan}{31001, 31002, 31003, 31004, 31005, $\hdots$} |
+| $\vdots$ | $\vdots$ |      $\vdots$       |$\vdots$                                                                              |
+: Example of ranked alert list for 30/03/2018 {#tbl-alert_list_ch3}
+
+To give a wider view of how outliers have occurred and to account for them in the historic data, the severity per cluster can be visualised in a spatiotemporal heatmap as exemplified in @fig-cluster_heatmap. This figure shows the severity of detected outliers over time for every cluster, where clusters are arranged from left to right by nearest to furthest from the centre of Washington D.C. The order of the clusters along the x-axis could also be arranged to highlight further spatial patterns e.g. from North to South. This type of visualisation can help to identify large-scale patterns in the outliers. For example, knowing for which times of year or days of the week outliers are more likely to be detected can help to steer the attention of analysts. Similarly, dedicated analysts may be assigned to monitor dedicated clusters, and this helps to identify which clusters may need more manual adjustments. 
+
+```{r}
+#| label: fig-cluster_heatmap
+#| fig-cap: Outlier severity for each cluster between 2017 and 2019. Figure originally included in @Rennie_thesis.
+#| fig-height: 3.5
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+my_dates <- seq.Date(as.Date("2017/1/1"), as.Date("2019/12/31"), "days")
+c <- spatial.median(station_data[, c(3, 2)])
+clusters <- mst_clustering_threshold(input_mat, corr_threshold = 0.15)
+clustering <- clusters$cluster_list
+cluster_num <- 1:length(clustering)
+dist <- numeric(length(clustering))
+for (i in 1:length(dist)) {
+  if (length(clustering[[i]]) == 1) {
+    dist[i] <- c_dist_centre(clustering[[i]], c)
+  } else {
+    d <- filter(station_data, TERMINAL_NUMBER %in% clustering[[i]])
+    m <- spatial.median(d[, c(3, 2)])
+    dist[i] <- distm(c(c[1], c[2]), c(m[1], m[2]), fun = distHaversine)
+  }
+}
+cluster_hm <- data.frame(cluster_num, dist)
+d <- agg_cluster_output_beta_hm[, -1]
+d2 <- d[, order(dist)]
+cluster_hm_matrix <- cbind(agg_cluster_output_beta_hm[, 1], d2)
+colnames(cluster_hm_matrix) <- c("date_of_day", 1:195)
+long_data <- tibble(cluster_hm_matrix %>%
+  gather(cluster_num2, perc, "1":"195"))
+p <- ggplot(
+  data = long_data,
+  aes(x = cluster_num2, y = date_of_day, fill = perc)
+) +
+  geom_tile() +
+  labs(
+    y = "",
+    x = paste0("Closer to center of D.C.", "<--", "        Clusters        ", "-->", "Further from center of D.C.")
+  ) +
+  scale_fill_gradient2("Outlier\nseverity",
+    low = "#ffffcc", high = "#b10026",
+    mid = "#feb24c", midpoint = 0.8, na.value = "white",
+    breaks = c(0.48, 0.74, 1), labels = c(0, 0.5, 1)
+  ) +
+  theme(
+    panel.background = element_rect(fill = "transparent"),
+    plot.background = element_rect(fill = "transparent"),
+    axis.text.y = element_text(family = "serif", size = 9),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 10),
+    legend.text = element_text(family = "serif", size = 9),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "right",
+    legend.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+In addition to identifying patterns in @fig-cluster_heatmap, analysts could utilise this figure to find changes in the outlier patterns. For example, changes in the distribution of outliers along the x-axis would suggest a change in the spatial demand pattern, and could indicate a refresh of the clustering process is required. Changes in the distribution of outliers along the y-axis may indicate more or fewer outliers over time or, if the new pattern is regular, suggest that a variable is missing from the demand forecast. Changes in the colour of points may indicate that outliers are becoming more (or less) severe, i.e. demand is becoming less (or more) predictable, which could prompt a review of the forecasting and optimisation approached. For example, it could indicate that a more robust approach to optimisation is required if outliers are occurring more frequently or with higher severity.

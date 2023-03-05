@@ -1,0 +1,5 @@
+# Data availability statement
+
+The datasets analysed during this study are available from Capital Bikeshare in a public repository that does not issue datasets with DOIs at [s3.amazonaws.com/capitalbikeshare-data/index.html](https://s3.amazonaws.com/capitalbikeshare-data/index.html). Further information on any pre-processing performed by Capital Bikeshare is available at [ride.capitalbikeshare.com/system-data](https://ride.capitalbikeshare.com/system-data), and the license agreement at [ride.capitalbikeshare.com/data-license-agreement](https://ride.capitalbikeshare.com/data-license-agreement).
+
+The paper at hand was included as Chapter 4 in the doctoral thesis @Rennie_thesis. The figures within this paper are also included in, or adapted from, @Rennie_thesis.

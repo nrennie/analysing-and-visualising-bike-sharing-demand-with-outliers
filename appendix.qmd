@@ -1,0 +1,927 @@
+{{< pagebreak >}}
+
+\appendix 
+
+# Additional analysis 
+
+## Forecasting baseline demand
+
+### Temporal partitioning {#sec-app-preproc}
+
+In Section @sec-st_patterns, for the purposes of temporal partitioning of data, we define summer to be the months April through October. Winter is therefore November through March. The partitioning is chosen to give constant variance within a partition whilst also ensuring there is a sufficient number of observations within each partition to make outlier detection feasible. @fig-variance_rentals shows the rolling daily variance for station 31203, with the summer months highlighted.
+
+```{r}
+#| label: fig-variance_rentals
+#| fig-cap: Variance of usage patterns with summer months highlighted in green. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+d1_wide <- agg_station_matrix[[134]][1:1095, ]
+long_data <- d1_wide %>% gather(hour_of_day, count, "0":"23")
+long_data$hour_of_day <- as.numeric(long_data$hour_of_day)
+long_data <- long_data[order(long_data$date_of_day, long_data$hour_of_day), ]
+long_data$obs <- 1:26280
+long_data$var_24 <- rollapply(long_data$count, width = 24, FUN = var, fill = NA)
+p <- ggplot() +
+  geom_line(
+    data = long_data,
+    mapping = aes(
+      x = obs,
+      y = var_24
+    ),
+    linewidth = 0.2
+  ) +
+  scale_x_continuous("",
+    breaks = c(1, 8761, 17521),
+    labels = c("2017", "2018", "2019")
+  ) +
+  geom_rect(
+    mapping = aes(
+      xmin = which(long_data$date_of_day == as.Date("2017-04-01"))[1],
+      xmax = which(long_data$date_of_day == as.Date("2017-10-31"))[1],
+      ymin = 0,
+      ymax = 175
+    ),
+    fill = alpha("green4", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(
+      xmin = which(long_data$date_of_day == as.Date("2018-04-01"))[1],
+      xmax = which(long_data$date_of_day == as.Date("2018-10-31"))[1],
+      ymin = 0,
+      ymax = 175
+    ),
+    fill = alpha("green4", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(
+      xmin = which(long_data$date_of_day == as.Date("2019-04-01"))[1],
+      xmax = which(long_data$date_of_day == as.Date("2019-10-31"))[1],
+      ymin = 0,
+      ymax = 175
+    ),
+    fill = alpha("green4", 0.3)
+  ) +
+  ylim(0, 175) +
+  labs(y = "Variance") +
+  theme_light() +
+  coord_cartesian(expand = FALSE) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+The variance of winter is not constant, being slightly higher in the months that border the summer season. Further partitioning could be carried out e.g. partition by month. However, this results in much less data within each partition, which then makes outlier detection more difficult. 
+When applying binary segmentation changepoint detection [@Scott1974] to identify the partitions with different levels of variance, the algorithm returns 8 changepoints: 24 March 2017, 4 Nov 2017, 6 Dec 2017, 31 Mar 2018, 24 May 2018, 4 Nov 2018, 20 Mar 2019, and 4 Nov 2019. These are highlighted in @fig-cpt. These are relatively close to our pre-defined summer and winter partitions (indicated by red vertical lines in @fig-cpt. 
+
+```{r}
+#| label: fig-cpt
+#| fig-cap: Changepoints in variance of usage patterns. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+d1_wide <- agg_station_matrix[[134]][1:1095, ]
+long_data <- d1_wide %>% gather(hour_of_day, count, "0":"23")
+long_data$hour_of_day <- as.numeric(long_data$hour_of_day)
+long_data <- long_data[order(long_data$date_of_day, long_data$hour_of_day), ]
+long_data$obs <- 1:26280
+long_data$var_24 <- rollapply(long_data$count, width = 24, FUN = var, fill = NA)
+fit_changepoint <- cpt.var(long_data$count, know.mean = F, method = "BinSeg", Q = 100)
+cpt <- cpts(fit_changepoint)
+p <- ggplot() +
+  geom_line(
+    data = long_data,
+    mapping = aes(x = obs, y = var_24), linewidth = 0.2
+  ) +
+  scale_x_continuous("",
+    breaks = c(1, 8761, 17521),
+    labels = c("2017", "2018", "2019")
+  ) +
+  geom_rect(
+    mapping = aes(xmin = 1, xmax = cpt[1], ymin = 0, ymax = 175),
+    fill = alpha("green4", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[1], xmax = cpt[2], ymin = 0, ymax = 175),
+    fill = alpha("dodgerblue2", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[2], xmax = cpt[3], ymin = 0, ymax = 175),
+    fill = alpha("deeppink3", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[3], xmax = cpt[4], ymin = 0, ymax = 175),
+    fill = alpha("purple4", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[4], xmax = cpt[5], ymin = 0, ymax = 175),
+    fill = alpha("#FFAA00", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[5], xmax = cpt[6], ymin = 0, ymax = 175),
+    fill = alpha("lightgrey", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[6], xmax = cpt[7], ymin = 0, ymax = 175),
+    fill = alpha("gold2", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[7], xmax = cpt[8], ymin = 0, ymax = 175),
+    fill = alpha("cyan3", 0.3)
+  ) +
+  geom_rect(
+    mapping = aes(xmin = cpt[8], xmax = 26280, ymin = 0, ymax = 175),
+    fill = alpha("maroon3", 0.3)
+  ) +
+  geom_vline(xintercept = 2161, col = "red") +
+  geom_vline(xintercept = 10921, col = "red") +
+  geom_vline(xintercept = 19681, col = "red") +
+  geom_vline(xintercept = 7273, col = "red") +
+  geom_vline(xintercept = 16033, col = "red") +
+  geom_vline(xintercept = 24793, col = "red") +
+  ylim(0, 175) +
+  labs(y = "Variance") +
+  theme_light() +
+  coord_cartesian(expand = F) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+If there are already pre-defined seasons in use for planning purposes, these may be more appropriate. 
+
+### Functional regression model comparison {#sec-app-model_comp}
+
+In this section, we perform model comparison for the functional regression model used to account for different daily trends as detailed in Section @sec-st_patterns, @eq-funcreg.
+
+We use the \textbf{Cross-Validated Mean Integrated Squared Error} (CV-MSE) to determine the best-fitting model. The CV-MSE is given by:
+
+\begin{equation}
+    CV\mbox{-}MSE = \frac{1}{N}\sum_{n=1}^{N} \int (x_{n,s}(t) - \hat{x}_{n,s}(t) ) dt, 
+\end{equation}
+
+where $\hat{x}_{n,s}(t)$ is the prediction for the $n^{th}$ daily rental pattern at the station $s$, under the model fitted to all but the $n^{th}$ rental pattern. The model which produces the lowest CV-MSE is chosen as the best fitting. Unlike other model selection criterion such AIC, CV-MSE does not take into account the number of parameters. The CV-MSE for each of the 8 models considered is shown in the table below, for the stations in the cluster discussed in Section @sec-outliers_method.
+
+\begin{table}[!ht]
+\centering
+\resizebox{1\textwidth}{!}{\begin{tabular}{c|ccc|ccccccccc}
+\hline \hline
+\multirow{2}{*}{Model} & \multicolumn{3}{c}{Factors}          & \multicolumn{9}{c}{Station Number}                                                                                                                           \\ \cline{2-13}
+                       & Day        & Month      & Year       & 31303          & 31308          & 31309          & 31315          & 31316          & 31317          & 31319          & 32014          & 32040          \\ \hline
+1                      &            &            &            & 135.90         & 72.98          & 16.04          & 25.80          & 15.29          & 27.96          & 34.27          & 52.42          & 22.75          \\
+2                      & \cmark &            &            & 120.38         & 60.17          & 16.04          & 25.64          & 14.29          & 27.71          & 33.43          & 50.80          & 22.78          \\
+3                      &            & \cmark &            & 98.01          & 59.65          & 12.67          & 18.82          & 11.93          & 19.57          & 25.78          & 37.97          & 17.09          \\
+4                      &            &            & \cmark & 133.96         & 71.89          & 15.49          & 25.70          & 14.86          & 28.03          & 33.97          & 48.01          & 22.63          \\
+5                      & \cmark & \cmark &            & 82.40          & 46.50          & 12.61          & 18.65          & 10.83          & \textbf{19.20} & 24.80          & 36.07          & 17.01          \\
+6                      &            & \cmark & \cmark & 96.59          & 58.52          & 12.07          & 18.79          & 11.52          & 19.61          & 25.44          & 33.34          & 16.95          \\
+7                      & \cmark &            & \cmark & 119.04         & 59.02          & 15.47          & 25.63          & 13.87          & 27.77          & 33.13          & 46.28          & 22.66          \\
+8                      & \cmark & \cmark & \cmark & \textbf{80.85} & \textbf{45.29} & \textbf{12.00} & \textbf{18.62} & \textbf{10.39} & 19.23          & \textbf{24.46} & \textbf{31.32} & \textbf{16.87} \\ \hline \hline
+\end{tabular}}
+\caption{Cross validated mean square error for functional regression model comparison applied to unpartitioned data}
+\label{tbl-model_comp}
+\end{table}
+
+In most cases, the model which achieves the minimum mean squared error is model 8, which includes all three factors (day, week, and year). However, model 5 (day and month) also produces very similar results. 
+
+### Distribution of residuals {#sec-app-ridges}
+
+@fig-residuals_ridges shows the distribution of the residuals for each hour of the day for station 31005 -- see also @fig-residuals. The core of the distribution is symmetric around zero, but the tails of the distribution are positively skewed.
+
+```{r}
+#| label: fig-residuals_ridges
+#| fig-cap: Distribution of residual usage for each hour of the day for station 31005. Figure originally included in @Rennie_thesis.
+#| fig-height: 4
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+d5 <- agg_station_matrix[[6]]
+res5 <- residuals_function(d5, c(1, 1, 1))
+plot_data5 <- res5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p <- ggplot(
+  data = plot_data5,
+  mapping = aes(
+    x = count,
+    y = factor(hour_of_day),
+    fill = 0.5 - abs(0.5 - stat(ecdf))
+  )
+) +
+  stat_density_ridges(geom = "density_ridges_gradient", calc_ecdf = TRUE, scale = 5) +
+  xlim(-18, 18) +
+  scale_fill_viridis_c(direction = -1) +
+  labs(x = "Residual usage", y = "Hour of day") +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    panel.border = element_blank(),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+### Accounting for skewness {#sec-app-skew}
+
+@fig-usage_hist(a) shows the distribution of the normalised total daily usage for station 31235, which exhibits positive skew. Not all stations exhibit such positively skewed distributions -- see @fig-skew_dist.
+
+```{r}
+#| label: fig-skew_dist
+#| fig-cap: Distribution of skewness of distributions of total daily usage across all stations. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+skew_vec <- tibble(
+  skew = unlist(lapply(agg_station_matrix, function(x) skewness(rowSums(x[, 2:25]))))
+)
+p <- ggplot(skew_vec, aes(x = skew)) +
+  geom_histogram(aes(y = ..density..),
+    position = "identity",
+    alpha = 0.3,
+    color = "#2c7fb8",
+    fill = "#2c7fb8"
+  ) +
+  geom_density(
+    alpha = 0.3,
+    fill = "#2c7fb8",
+    colour = "#2c7fb8"
+  ) +
+  xlim(-1, 18) +
+  ylim(0, 0.75) +
+  labs(x = "Skewness", y = "Density") +
+  coord_cartesian(expand = F) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+
+p
+```
+
+The distributions of total daily usage have a skewness lying between -0.4 and 15.8, with the median skewness across all stations being 0.71. Larger positive skew is more common in stations where mean usage is very low, and since demand is bounded below by zero, only increases in demand are observed. This results in more *positive* outliers than *negative* (see Section @sec-discussion). Given that most stations exhibit slight positive skew, it may be desirable to transform the data before performing outlier detection. To account for the skew, the rental patterns can first be transformed e.g. with a logarithmic transform. However, this is not applicable to all stations (as some are already negatively skewed) and can result in a negatively skewed distribution -- @fig-usage_hist.
+
+```{r}
+#| label: fig-usage_hist
+#| fig-cap: Distribution of total daily usage for station 31235. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+d1_wide <- agg_station_matrix[[165]]
+total_days <- rowSums(d1_wide[, 2:25])
+standard_days <- (total_days - mean(total_days)) / max(total_days)
+df <- data.frame(standard_days)
+p1 <- ggplot(df, aes(x = standard_days)) +
+  geom_histogram(aes(y = after_stat(density)),
+    position = "identity",
+    alpha = 0.3,
+    color = "#2c7fb8",
+    fill = "#2c7fb8"
+  ) +
+  geom_density(
+    alpha = 0.3,
+    fill = "#2c7fb8",
+    colour = "#2c7fb8"
+  ) +
+  xlim(-1, 1) +
+  ylim(0, 4) +
+  labs(
+    x = "Normalised total daily usage",
+    y = "Density",
+    caption = "(a) Normalised total daily usage\nfor station 31235"
+  ) +
+  coord_cartesian(expand = F) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"), # top, right, bottom, left
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 11, hjust = 0.5),
+    legend.key = element_blank()
+  )
+total_days <- log(rowSums(d1_wide[, 2:25]))
+standard_days <- (total_days - mean(total_days[1:1086])) / max(total_days)
+df <- data.frame(standard_days)
+p2 <- ggplot(df, aes(standard_days)) +
+  geom_histogram(aes(y = ..density..),
+    position = "identity",
+    alpha = 0.3,
+    color = "#2c7fb8",
+    fill = "#2c7fb8"
+  ) +
+  geom_density(
+    alpha = 0.3,
+    fill = "#2c7fb8",
+    colour = "#2c7fb8"
+  ) +
+  xlim(-1, 1) +
+  ylim(0, 4) +
+  coord_cartesian(expand = F) +
+  labs(
+    x = "Normalised total daily usage",
+    y = "Density",
+    caption = "(b) Normalised log-transformed total\ndaily usage for station 31235"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.margin = unit(c(0.2, 0.4, 0.2, 0.2), "cm"),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh", rel_widths = c(1, 1))
+p
+```
+
+When applying the outlier detection procedure to the untransformed data, the fraction of positive outliers is consistently higher than the fraction of negative outliers. On average, 78% of outliers are positive. That is, outliers are more likely to be caused by increased demand than decreased. This is easily explained by the fact that demand is bounded below by zero, and in many cases the mean usage pattern is close to zero, such that negative demand is unobservable. Applying a logarithmic transformation before carrying out the outlier detection results in around 60% of outliers being positive. 
+
+```{r}
+#| label: fig-pos_neg_transform
+#| fig-cap: Fraction of outliers that are positive and negative, before and after applying a logarithmic transformation. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+num_outs_pos_agg <- apply(
+  agg_station_pos_neg[, 2:579], 1,
+  function(x) sum(x > 0, na.rm = T)
+)
+num_outs_neg_agg <- apply(
+  agg_station_pos_neg[, 2:579], 1,
+  function(x) sum(x < 0, na.rm = T)
+)
+num_outs_pos_agg_log <- apply(
+  log_agg_station_pos_neg[, 2:579], 1,
+  function(x) sum(x > 0, na.rm = T)
+)
+num_outs_neg_agg_log <- apply(
+  log_agg_station_pos_neg[, 2:579], 1,
+  function(x) sum(x < 0, na.rm = T)
+)
+plot_data <- tibble(date = agg_station_pos_neg[, 1], num_outs_pos_agg, num_outs_neg_agg)
+plot_data$date_my <- as.yearmon(plot_data$date)
+plot_data <- plot_data %>% group_by(date_my)
+plot_data <- plot_data %>% summarise(count_pos = sum(num_outs_pos_agg), count_neg = sum(num_outs_neg_agg))
+plot_data$total_agg <- plot_data$count_pos + plot_data$count_neg
+plot_data$prop_neg <- (plot_data$count_neg / plot_data$total_agg) * 100
+plot_data$prop_pos <- (plot_data$count_pos / plot_data$total_agg) * 100
+long_data <- pivot_longer(plot_data, cols = c(prop_neg, prop_pos), values_to = "prop")
+p1 <- ggplot(data = long_data) +
+  geom_bar(aes(x = date_my, y = prop, fill = name),
+    position = "stack",
+    stat = "identity"
+  ) +
+  scale_x_yearmon(n = 3) +
+  scale_fill_manual("",
+    values = c("prop_neg" = "#5ab4ac", "prop_pos" = "#d8b365"),
+    labels = c("Negative", "Positive")
+  ) +
+  labs(x = "", y = "Proportion of outliers", caption = "(a) Untransformed data") +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9, hjust = 0.5),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "white", color = NA),
+    legend.position = "top", legend.justification = c(0.5, 0.5),
+    legend.title = element_blank(),
+    plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+plot_data_log <- tibble(date = agg_station_pos_neg[, 1], num_outs_pos_agg_log, num_outs_neg_agg_log)
+plot_data_log$date_my <- as.yearmon(plot_data_log$date)
+plot_data_log <- plot_data_log %>% group_by(date_my)
+plot_data_log <- plot_data_log %>% summarise(count_pos = sum(num_outs_pos_agg_log), count_neg = sum(num_outs_neg_agg_log))
+plot_data_log$total_agg <- plot_data_log$count_pos + plot_data_log$count_neg
+plot_data_log$prop_neg <- (plot_data_log$count_neg / plot_data_log$total_agg) * 100
+plot_data_log$prop_pos <- (plot_data_log$count_pos / plot_data_log$total_agg) * 100
+long_data_log <- pivot_longer(plot_data_log, cols = c(prop_neg, prop_pos), values_to = "prop")
+p2 <- ggplot(data = long_data_log) +
+  geom_bar(aes(x = date_my, y = prop, fill = name),
+    position = "stack",
+    stat = "identity"
+  ) +
+  scale_x_yearmon(n = 3) +
+  scale_fill_manual("",
+    values = c("prop_neg" = "#5ab4ac", "prop_pos" = "#d8b365"),
+    labels = c("Negative", "Positive")
+  ) +
+  labs(x = "", y = "", caption = "(b) Logarithmic transform") +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9, hjust = 0.5),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "white", color = NA),
+    legend.position = "top", legend.justification = c(0.5, 0.5),
+    legend.title = element_blank(),
+    plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- ggarrange(p1, p2, ncol = 2, nrow = 1, common.legend = T, legend = "top")
+p
+```
+
+### Inter-daily autocorrelation {#sec-app-acf}
+
+@fig-acf_heatmap shows the inter-daily autocorrelations between the residual patterns for different days, at each hour. The early hours of the morning - especially at 04:00 and 06:00 - exhibit some autocorrelation of lag 7 i.e. weekly. A functional ARIMA model could be fitted to remove the autocorrelation. However, as it only affects a so few hours of the day, we do not investigate this further here.
+
+```{r}
+#| label: fig-acf_heatmap
+#| fig-cap: Inter-daily autocorrelations of residuals for station 31005. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+d5 <- agg_station_matrix[[6]]
+res5 <- residuals_function(d5, c(1, 1, 1))
+output <- apply(res5[, 2:25], 2, function(x) acf(x, lag.max = 30, plot = FALSE))
+acf_matrix <- matrix(NA, nrow = 24, ncol = 31)
+for (i in 1:24) {
+  acf_matrix[i, ] <- output[[i]]$acf
+}
+colnames(acf_matrix) <- sapply(0:30, function(x) paste("Lag ", x, sep = ""))
+rownames(acf_matrix) <- 0:23
+hour_labels <- c(
+  "00:00", "", "", "", "04:00", "", "", "",
+  "08:00", "", "", "", "12:00", "", "", "",
+  "16:00", "", "", "", "20:00", "", "", ""
+)
+acf_col <- function(acf_v) {
+  if (abs(acf_v) <= 0.05) {
+    return("|acf| <= 0.05")
+  }
+  if (abs(acf_v) > 0.05 & abs(acf_v) <= 0.1) {
+    return("0.05 < |acf| <= 0.1")
+  }
+  if (abs(acf_v) > 0.1 & abs(acf_v) <= 0.2) {
+    return("0.1 < |acf| <= 0.2")
+  }
+  if (abs(acf_v) > 0.2) {
+    return("|acf| > 0.2")
+  }
+}
+plot_data <- tibble(data.frame(t(acf_matrix)))
+plot_data$lag <- 0:30
+colnames(plot_data) <- 0:23
+long_data <- plot_data %>% gather(hour_of_day, acf_val, "0":"23")
+colnames(long_data)[1] <- "lag"
+long_data$acf_col <- sapply(long_data$acf_val, function(x) acf_col(x))
+long_data$acf_col <- factor(long_data$acf_col,
+  levels = rev(c(
+    "|acf| <= 0.05",
+    "0.05 < |acf| <= 0.1",
+    "0.1 < |acf| <= 0.2",
+    "|acf| > 0.2"
+  ))
+)
+p <- ggplot(
+  data = long_data,
+  aes(
+    x = as.numeric(hour_of_day),
+    y = as.numeric(lag),
+    fill = I(acf_col)
+  )
+) +
+  geom_tile() +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  scale_y_continuous(breaks = seq(0, 30, 5), labels = seq(0, 30, 5)) +
+  scale_fill_manual(values = c(
+    "|acf| <= 0.05" = "#abd9e9",
+    "0.05 < |acf| <= 0.1" = "#ffffbf",
+    "0.1 < |acf| <= 0.2" = "#fdae61",
+    "|acf| > 0.2" = "#d7191c"
+  )) +
+  labs(y = "Lag") +
+  theme(
+    panel.background = element_rect(fill = "transparent"),
+    plot.background = element_rect(fill = "transparent"),
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "right",
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+
+p
+```
+
+## Using spatial patterns to cluster stations
+
+### Effect of parameter choices on clustering {#sec-app-cluster_params}
+
+```{r}
+#| label: fig-mst_params
+#| fig-cap: Cluster sensitivity to parameter changes when other parameters remain fixed at $\rho_{\tau}$=0.15, $R$ = 5000m, $D_{inner}$ = 500m, and $D_{outer}$ = 1000m. Figure originally included in @Rennie_thesis.
+#| fig-height: 6
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+c <- seq(-1, 1, 0.05)
+R <- seq(0, 30000, 1000)
+D_i <- seq(0, 5000, 250)
+D_o <- seq(0, 5000, 250)
+d <- data.frame(x = c, y1 = num_clusts_c, y2 = sdcs_c)
+p1 <- ggplot(data = d, aes(x = x)) +
+  geom_line(aes(y = y1), size = 0.5) +
+  geom_line(aes(y = y2 / 0.1), size = 0.5, col = "dodgerblue2") +
+  labs(x = "", caption = expression(paste("(a) Correlation threshold, ", rho[tau]))) +
+  theme_light() +
+  scale_y_continuous(
+    name = "Number of clusters", limits = c(0, 600),
+    sec.axis =
+      sec_axis(~ . * 0.1,
+        name = "Standard deviation of\ncluster size (SDCS)"
+      )
+  ) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.y.right = element_text(family = "serif", color = "dodgerblue2", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.margin = margin(0.1, 0.3, 0.1, 0.1, "cm"),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0, 1), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    legend.key = element_blank()
+  )
+d <- data.frame(x = R, y1 = num_clusts_R, y2 = sdcs_R)
+p2 <- ggplot(data = d, aes(x = x)) +
+  geom_line(aes(y = y1), size = 0.5) +
+  geom_line(aes(y = y2 / 0.1), size = 0.5, col = "dodgerblue2") +
+  labs(x = "", caption = expression(paste("(b) Radius, ", R))) +
+  theme_light() +
+  scale_y_continuous(
+    name = "Number of clusters", limits = c(0, 600),
+    sec.axis =
+      sec_axis(~ . * 0.1,
+        name = "Standard deviation of\ncluster size (SDCS)"
+      )
+  ) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.y.right = element_text(family = "serif", color = "dodgerblue2", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.margin = margin(0.1, 0.3, 0.1, 0.1, "cm"),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0, 1), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    legend.key = element_blank()
+  )
+d <- data.frame(x = D_i, y1 = num_clusts_D_i, y2 = sdcs_D_i)
+p3 <- ggplot(data = d, aes(x = x)) +
+  geom_line(aes(y = y1), size = 0.5) +
+  geom_line(aes(y = y2 / 0.1), size = 0.5, col = "dodgerblue2") +
+  labs(x = "", caption = expression(paste("(c) Inner distance threshold, ", D[inner]))) +
+  theme_light() +
+  xlim(0, 2000) +
+  scale_y_continuous(
+    name = "Number of clusters", limits = c(0, 600),
+    sec.axis =
+      sec_axis(~ . * 0.1,
+        name = "Standard deviation of\ncluster size (SDCS)"
+      )
+  ) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.y.right = element_text(family = "serif", color = "dodgerblue2", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.margin = margin(0.1, 0.3, 0.1, 0.1, "cm"),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0, 1), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    legend.key = element_blank()
+  )
+d <- data.frame(x = D_o, y1 = num_clusts_D_o, y2 = sdcs_D_o)
+p4 <- ggplot(data = d, aes(x = x)) +
+  geom_line(aes(y = y1), size = 0.5) +
+  geom_line(aes(y = y2 / 0.1), size = 0.5, col = "dodgerblue2") +
+  labs(x = "", caption = expression(paste("(d) Outer distance threshold, ", D[outer]))) +
+  theme_light() +
+  scale_y_continuous(
+    name = "Number of clusters", limits = c(0, 600),
+    sec.axis =
+      sec_axis(~ . * 0.1,
+        name = "Standard deviation of\ncluster size (SDCS)"
+      )
+  ) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.y.right = element_text(family = "serif", color = "dodgerblue2", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.margin = margin(0.1, 0.3, 0.1, 0.1, "cm"),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0, 1), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p1, p2, p3, p4, ncol = 2, nrow = 2, align = "vh")
+p
+```
+
+Our clustering method is tuned using four parameters: the correlation threshold $\rho$, as well as distance metrics  introduced in Section \ref{sec-clustering_ch3}. We now evaluate the sensitivity of changing these parameters on (i) the number of clusters obtained, and (ii) the standard deviation in cluster sizes (SDCS) \citep{Lin2019}. The SDCS is given by:
+
+\begin{equation}
+    SDCS = \sqrt{\frac{1}{K-1} \sum_{k=1}^K \left(S_k - \frac{S}{K}\right)^2},
+\end{equation}
+
+where $S$ is the number of stations, $K$ is the number of clusters, $S_k$ is the number of stations in cluster $k$. The SDCS quantifies a measure of the balance of the different cluster sizes. We do not seek to minimise nor maximise the SDCS -- since choosing extreme parameter values trivially creates clusters of size 1 or one giant cluster. 
+
+@fig-mst_params shows the change in number of clusters and SDCS as we vary parameter values. There is an inverse relationship between the number of clusters and the SDCS across all four variables. While an increase in either correlation threshold or radius results in a decrease of SDCS, increasing either of the distance thresholds increases the SDCS. In order to achieve a balance between number of clusters and SDCS, we choose parameter values close to the intersection* of the two lines. This results in a correlation threshold of between 0 and 0.4; a radius between 5,000m and 10,000m; an inner distance threshold between 500m and 1,000m, and an outer distance threshold of approximately 1,000m.
+
+### Normalised Mutual Information {#sec-app-nmi_def_ch3}
+
+For a graph containing $M$ stations, the mutual information between two clusterings $\mathcal{A}$ and $\mathcal{B}$ of the $M$ nodes in the graph is defined as:
+
+\begin{equation}
+    I(\mathcal{A},\mathcal{B}) = \sum_{a=1}^{|\mathcal{A}|} \sum_{b=1} ^{|\mathcal{B}|} \frac{|\mathcal{A} \cap \mathcal{B}|}{M} \mbox{log} \left(|\mathcal{A} \cap \mathcal{B}|\frac{M}{M_a M_b}\right),
+\end{equation}
+where $M_a$ is the number of nodes in the $a^{th}$ cluster of clustering $\mathcal{A}$, and similarly for $M_b$. The \textbf{normalised mutual information (NMI)} between two clusterings is defined as \citep{Amelio2015}:
+\begin{equation}
+    NMI(\mathcal{A},\mathcal{B}) = \frac{2I(\mathcal{A},\mathcal{B})}{H(\mathcal{A})+H(\mathcal{B})},
+\end{equation}
+where $H(\mathcal{A})$ is the entropy (a measure of uncertainty) defined as:
+\begin{equation}
+    H(\mathcal{A}) = - \sum_{a=1}^{|\mathcal{A}|} \frac{M_a}{M} \mbox{log} \left(\frac{M_a}{M}\right).
+\end{equation}
+
+$NMI(\mathcal{A},\mathcal{B})$ = 1 if $\mathcal{A}$ and $\mathcal{B}$ are identical, and 0 if they are completely different.
+
+## Additional Discussion {#sec-app-add_disc}
+
+### Effects of data temporal patterns on outlier detection {#sec-app-preproc_disc} 
+
+In Section @sec-st_patterns, we outlined two steps (functional regression and temporal partitioning) that could be undertaken to account for different patterns in the data. Here, we consider how the inclusion of these steps affects the outcome of the outlier detection. For a homogeneous data set, we would expect approximately equal numbers of outliers detected on each day of the week, and month of the year. @fig-regression_output shows the difference between the mean fraction of outliers per day (or month) and fraction of outliers which are observed on each day of the week (or month).
+
+```{r}
+#| label: fig-regression_output
+#| fig-cap: Fraction of outliers occurring on each day of the week and month of the year, with and without applying functional regression model. Figure originally included in @Rennie_thesis.
+#| fig-height: 3.5
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+p1 <- ggplot(
+  data = regression_weekday,
+  aes(x = day_of_week, y = diff, fill = type)
+) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual("", values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  scale_y_continuous(breaks = c(-0.05, 0, 0.05, 0.1, 0.15)) +
+  labs(
+    x = "", y = "Difference from mean\nfraction of outliers",
+    caption = "(a) Outliers per weekday"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 8),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "top",
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p2 <- ggplot(
+  data = regression_month,
+  aes(x = month_of_year, y = diff, fill = type)
+) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual("", values = c("#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3")) +
+  scale_y_continuous(breaks = c(-0.05, 0, 0.05, 0.1, 0.15)) +
+  labs(
+    x = "", y = "Difference from mean\nfraction of outliers",
+    caption = "(b) Outliers per month"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 8),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "top",
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- ggarrange(p1, p2, ncol = 1, nrow = 2, common.legend = T, legend = "top")
+p
+```
+
+The results are shown for the case where the (i) there is no accounting for temporal patterns; (ii) the regression model is applied with no partitioning; (iii) only partitioning is applied with no regression, and (iv) both regression and partitioning is applied. When we do not account for temporal patterns in the data, we detect far more outliers on weekends and in the summer months. Including the regression step (without partitioning) improves this imbalance somewhat. When the data has been partitioned, regression makes little difference to the proportion of outliers detected on each day or month. Although we partition the data to account for different variance, this implicitly takes care of differences in mean between the same groups. As there is little difference in mean trend between days or months in the same groups. partitioning with or without regression gives similar results. 
+
+### Weather as an explanatory factor for demand outliers {#sec-app-weather}
+
+@fig-app_weather shows the weather data used for analysis in Section @sec-weather.
+
+```{r}
+#| label: fig-app_weather
+#| fig-cap: Weather data obtained from Visual Crossing for 2017 - 2019. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+my_dates <- seq.Date(as.Date("2017/1/1"), as.Date("2019/12/31"), "days")
+temp_day <- rowMeans(temp_matrix[, 2:25], na.rm = T)
+temp_prob_data <- data.frame(dates = my_dates, temp_day)
+p1 <- ggplot() +
+  geom_line(
+    data = temp_prob_data,
+    mapping = aes(x = dates, y = temp_day, col = temp_day),
+    linewidth = 0.3
+  ) +
+  coord_cartesian(expand = F) +
+  scale_colour_gradient("", low = "gold2", high = "red3", na.value = "lightgray") +
+  labs(caption = "(a) Average daily temperature (F)", x = "") +
+  scale_y_continuous(name = "Temperature (F)", limits = c(15, 90)) +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "white", color = "white"),
+    panel.background = element_rect(fill = "white", color = "white"),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    plot.margin = unit(c(0.7, 0.2, 0.2, 0.2), "cm"), # top, right, bottom, left
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+r2 <- rowSums(rain_matrix[, 2:25], na.rm = T)
+plot_data <- data.frame(x = rain_matrix$date_of_day, y = r2)
+p2 <- ggplot() +
+  geom_line(
+    data = plot_data,
+    mapping = aes(x = x, y = r2, col = r2),
+    linewidth = 0.3
+  ) +
+  coord_cartesian(expand = F) +
+  scale_color_gradient("", low = "lightblue", high = "navy") +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(caption = "(b) Total daily precipitation (in)", x = "") +
+  scale_y_continuous(name = "Precipitation (in)", limits = c(0, 6)) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    plot.margin = unit(c(0.7, 0.2, 0.2, 0.2), "cm"),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh", rel_widths = c(1, 1))
+p
+```
+
+\clearpage

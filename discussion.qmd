@@ -1,0 +1,554 @@
+# Discussion {#sec-discussion}
+In this section, we discuss patterns in the outliers detected in the Capital Bikeshare data, and suggest potential explanations for their causes. 
+
+@fig-pos_neg_line visualises the number of positive and negative outliers over the days of the time span recorded in the data set. By visualising the positive and negative outliers jointly, analysts can immediately see that (i) negative outliers typically affect far fewer clusters than positive outliers; (ii) the spikes where outlier demand affects a large number of clusters do not occur at the same time for positive and negative outliers; and (iii) the seasonal patterns in the detected outliers are not the same for positive and negative outliers. This can aid analysts in their predictions of outliers: though positive outliers are always more common, the proportion of outliers that are negative changes throughout the year. Though the largest negative outliers occur in summer, the transition between summer and winter seems particularly affected by negative outliers, with May and October exhibiting the highest proportion of negative outliers at around 33%.
+
+```{r}
+#| label: fig-pos_neg_line
+#| fig-cap: Positive and negative outliers. Figure originally included in @Rennie_thesis.
+#| fig-height: 2.5
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+num_outs_pos_agg <- apply(agg_station_pos_neg[, 2:579], 1, function(x) sum(x > 0, na.rm = T))
+num_outs_neg_agg <- apply(agg_station_pos_neg[, 2:579], 1, function(x) sum(x < 0, na.rm = T))
+plot_data <- tibble(date = agg_station_pos_neg[, 1], num_outs_pos_agg, num_outs_neg_agg)
+p <- ggplot(data = plot_data) +
+  geom_line(aes(x = date, y = num_outs_pos_agg, col = "prop_pos")) +
+  geom_line(aes(x = date, y = num_outs_neg_agg, col = "prop_neg")) +
+  scale_colour_manual("",
+    values = c("prop_neg" = "#5ab4ac", "prop_pos" = "#d8b365"),
+    labels = c("Negative", "Positive")
+  ) +
+  theme_light() +
+  labs(x = "", y = "Number of clusters\nclassified as outliers") +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0.05, 0.95), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 11, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+The increased occurrence of positive outliers can be explained by the fact that demand is bounded below by zero, and in many cases the mean usage pattern is close to zero, such that negative demand is unobservable. This may motivate a transformation of the data before outlier detection is performed -- see Appendix @sec-app-skew for further details.
+
+Outliers occur independently in different clusters. In fact, only four days observe outliers in more than 125 of the 195 clusters -- one negative and three positive. The three positive outliers occur on 25 March 2017, 3 December 2018, and 30 March 2019. Explanations from events arise for two of these dates: 3 December 2018 relates to the funeral of George H. W. Bush, and a NATO protest occurred in Washington D.C. on 30 March 2019. 25 March 2017 and 30 March 2019 were both warm days, and the last Saturday in March - perhaps suggesting that the definition of *summer* should be from the last Saturday in March, rather than April 1. 
+
+It is interesting to note that the next most widespread positive outlier relates to Independence Day in 2017. Independence Day was detected as a positive outlier in 123, 80, and 35 clusters in 2017, 2018, and 2019. However it was detected as a negative outlier in 46, 47, and 57 stations respectively. The date of the widespread negative outlier is 21 July 2018 which relates to one of the worst storms Washington D.C. has seen. Further discussion of how weather is related to outliers can be found in Section @sec-weather.
+
+## Spatiotemporal patterns in detected outliers
+In this section, we analyse the detected outliers and consider spatial and temporal patterns within the outliers. 
+
+#### Temporal patterns.
+Even after accounting for the lower means and reduced inter-daily variance of the winter months, we detect fewer outliers in winter (indicated by the two horizontal white bars in @fig-cluster_heatmap). Otherwise, we find no clear systematic temporal patterns to the detected outliers. Appendix @sec-app-preproc_disc provides additional discussion on the temporal aspects of the detected outliers, including the visible temporal patterns in the outliers when we fail to account for temporal patterns in the forecasting step. 
+
+```{r}
+#| label: fig-outliers_temporal_clusters
+#| fig-cap: Exemplified severity for outliers detected in one cluster, showing temporal clustering of outliers with each colour representing one of nine clusters. Figure adapted from @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+agg_cluster_output <- data.frame(matrix(NA, ncol = (length(agg_results_reg) + 1), nrow = length(my_dates)))
+agg_cluster_output[, 1] <- my_dates
+colnames(agg_cluster_output) <- c("date", names(agg_results_reg))
+cluster_names <- names(agg_results_reg)
+for (i in 1:length(agg_results_reg)) {
+  cluster_list <- agg_results_reg[[i]]
+  if (nrow(cluster_list) > 0) {
+    for (j in 1:nrow(cluster_list)) {
+      select_date <- cluster_list[j, 1]
+      if (!is.na(select_date)) {
+        agg_cluster_output[which(agg_cluster_output$date == select_date), i + 1] <- cluster_list[j, 2]
+      }
+    }
+  }
+}
+d_mat <- agg_cluster_output[, 2:196]
+outlier_mat <- tibble(d_mat[, order(dist)])
+dates <- as.numeric(agg_cluster_output[, 1])
+ts_d <- unname(unlist(outlier_mat[, 16]))
+ts_d <- unname(unlist(outlier_mat[, 19]))
+ts_na <- ts(data = ts_d, start = dates[1], end = dates[1095], frequency = 1)
+plot_data <- tibble(ts_na, dates = agg_cluster_output[, 1]) %>% filter(!is.na(ts_na))
+plot_data$point_col <- c(
+  "#e41a1c", "#377eb8", rep("#984ea3", 2), "#4daf4a",
+  rep("#a65628", 4), "#ffff33", rep("#ff7f00", 2), rep("#f781bf", 2), "#999999"
+)
+p <- ggplot() +
+  geom_segment(
+    data = plot_data,
+    aes(x = dates, xend = dates, y = 0, yend = as.vector(ts_na), colour = point_col),
+    linewidth = 0.4
+  ) +
+  geom_point(
+    data = plot_data,
+    mapping = aes(x = dates, y = as.vector(ts_na)),
+    size = 0.6
+  ) +
+  labs(x = "", y = "Outlier severity") +
+  theme_light() +
+  theme(
+    panel.background = element_rect(fill = "transparent"),
+    plot.background = element_rect(fill = "transparent"),
+    axis.text.y = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 0, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none",
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p
+```
+
+However, @fig-outliers_temporal_clusters shows that although outliers can sometimes occur as one-off events, they are also quite likely to occur in temporal clusters. Therefore, once an outlier has been identified, the information can be used to support adjustments to planning in the subsequent days. 
+
+#### Spatial patterns.
+Next, we discuss spatial patterns in the detected outliers and consider the relationship between outliers in pick-up and drop-off usage patterns. @fig-cluster_heatmap shows that the cluster which is formed around the centre of Washington D.C. (indicated by the first column on the left) experiences more frequent and higher probability outliers. Otherwise, there is little geographic pattern to how often outliers occur in terms of distance from the centre.
+
+Two other clusters besides the central D.C. cluster exhibit a higher number of outliers with higher severity than other clusters. @fig-cluster_heatmap indicates these by darker vertical lines. These clusters are highlighted in @fig-cluster_hm_highlight. These clusters are both fairly close to the centre of Washington D.C., and are close by the two main bridges across the Potomac River into the centre. The stations in these clusters are also situated close to The Pentagon, Arlington National Cemetery, and Ronald Reagan Washington National Airport. Therefore these clusters are likely to experience business commuter demand, tourist demand, and potentially also airport travellers i.e. have multiple sources of outlier demand.
+
+```{r}
+#| label: fig-cluster_hm_highlight
+#| fig-cap: Two (non-central D.C.) clusters which exhibit higher numbers of outliers. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+my_dates <- seq.Date(as.Date("2017/1/1"), as.Date("2019/12/31"), "days")
+c <- spatial.median(station_data[, c(3, 2)])
+input_mat <- adj_mat * (1 - cor_mat)
+clusters <- mst_clustering_threshold(input_mat, corr_threshold = 0.15)
+clustering <- clusters$cluster_list
+cluster_num <- 1:length(clustering)
+dist <- numeric(length(clustering))
+for (i in 1:length(dist)) {
+  if (length(clustering[[i]]) == 1) {
+    dist[i] <- c_dist_centre(clustering[[i]], c)
+  } else {
+    d <- filter(station_data, TERMINAL_NUMBER %in% clustering[[i]])
+    m <- spatial.median(d[, c(3, 2)])
+    dist[i] <- distm(c(c[1], c[2]), c(m[1], m[2]), fun = distHaversine)
+  }
+}
+cluster_names <- names(agg_results_beta)
+c_names <- cluster_names[order(dist)]
+d29 <- station_data[which(station_data$TERMINAL_NUMBER %in% str_split(c_names[29], " ")[[1]]), ]
+d41 <- station_data[which(station_data$TERMINAL_NUMBER %in% str_split(c_names[41], " ")[[1]]), ]
+p1 <- ggplot() +
+  geom_polygon(
+    data = state, aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = FALSE) +
+  labs("(a) ") +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  geom_point(
+    data = station_data, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "grey", pch = 19, size = 0.4
+  ) +
+  geom_point(
+    data = d29, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "#2b83ba", pch = 19, size = 0.4
+  ) +
+  annotate("text", x = -76.9, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.3, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_blank(),
+    legend.position = "none",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = unit(c(0.3, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+p2 <- ggplot() +
+  geom_polygon(
+    data = state, aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = FALSE) +
+  labs("(b) ") +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  geom_point(
+    data = station_data, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "grey", pch = 19, size = 0.4
+  ) +
+  geom_point(
+    data = d41, aes(x = LONGITUDE, y = LATITUDE),
+    colour = "#2b83ba", pch = 19, size = 0.4
+  ) +
+  annotate("text", x = -76.9, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.3, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_blank(),
+    legend.position = "none",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = unit(c(0.3, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh")
+p
+```
+
+We also consider the frequency of outliers on the station level. @fig-cluster_num_outs shows the number of days that each individual station was classified as an outlier between 2017 and 2019. Stations where no outliers were detected are not shown. Outliers are more commonly detected in stations nearer the centre of D.C.
+
+```{r}
+#| label: fig-cluster_num_outs
+#| fig-cap: Number of days each station was classified as an outlier between 2017-2019. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+my_dates <- seq.Date(as.Date("2017/1/1"), as.Date("2019/12/31"), "days")
+agg_station_output <- data.frame(matrix(NA, ncol = (length(names(agg_station_matrix)) + 1), nrow = length(my_dates)))
+agg_station_output[, 1] <- my_dates
+colnames(agg_station_output) <- c("date", names(agg_station_matrix))
+for (i in 1:length(agg_results_beta)) {
+  cluster_list <- agg_results_beta[[i]]
+  if (nrow(cluster_list) > 0) {
+    for (j in 1:nrow(cluster_list)) {
+      all_legs <- cluster_list[j, 3]
+      select_date <- cluster_list[j, 1]
+      leg_list <- trimws(unlist(strsplit(all_legs, ",")))
+      for (k in 1:length(leg_list)) {
+        if (!is.na(select_date) & !is.na(leg_list[k])) {
+          agg_station_output[which(agg_station_output$date == select_date), leg_list[k]] <- cluster_list[j, 2]
+        }
+      }
+    }
+  }
+}
+station_num_outs <- colSums(agg_station_output[, 2:579] > 0, na.rm = T)
+station_data$num_outs <- station_num_outs / max(station_num_outs)
+p <- ggplot() +
+  geom_polygon(
+    data = state, aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = "none") +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  geom_point(data = station_data, aes(x = LONGITUDE, y = LATITUDE, col = num_outs), pch = 19, size = 0.4) +
+  scale_colour_gradient2("Num.\noutliers",
+    low = "#ffffcc",
+    high = "#b10026", mid = "#feb24c",
+    midpoint = 0.4, na.value = "white",
+    breaks = c(0, 1), labels = c(0, 45)
+  ) +
+  annotate("text", x = -76.9, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.3, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_text(family = "serif", size = 11, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 11, hjust = 0.5),
+    legend.position = "right",
+    plot.caption = element_text(family = "serif", size = 11, hjust = 0.5),
+    plot.margin = unit(c(0.3, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank()
+  )
+p
+```
+
+We analyse the differences in the spatial patterns of the outliers detected in pick-up and drop-off usage patterns. For this, we use the clustering based on the overall usage patterns as it allows direct comparison of outliers in different clusters. Subsequently, we apply the outlier detection procedure separately to the pick-up and drop-off usage patterns. This enables us to isolate how the detected outliers and their severities change when the stations in each cluster remain constant. Additional discussion of the spatiotemporal patterns of the outliers can be found in Appendix @sec-app-add_disc, including further visualisations that analysts may use to identify such patterns to aid in decision-making.
+
+```{r}
+#| label: fig-cosine_start_end
+#| fig-cap: Cosine similarity between outliers detected in pick-up and drop-off usage patterns under different correlation thresholds. Figure originally included in @Rennie_thesis.
+#| fig-height: 3.5
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+plot_data1 <- tibble(clust_num = 1:78, y = factor(rep(1, 78)), cos_val = start_end_cos000)
+p1 <- ggplot(data = plot_data1, aes(x = clust_num, y = y, fill = cos_val)) +
+  geom_tile() +
+  scale_fill_gradient("", low = "#a1dab4", high = "#253494",
+                      na.value = "white", limits = c(0, 1), breaks = c(0, 1),
+                      labels = c("Dissimilar", "Similar")) +
+  labs(
+    y = "", x = paste0("Closer to center of D.C.", "<--",
+                       "  Clusters ", "-->", " Further from center of D.C."),
+    caption = expression(atop(paste("\n(a) Cosine similarity when ",
+                                    rho[tau], " = 0, 78 clusters")))) + 
+  theme(
+    panel.background = element_rect(fill = "transparent"),
+    plot.background = element_rect(fill = "transparent"),
+    axis.text.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks = element_blank(),
+    plot.margin = unit(c(0, 0, 0, 0), "cm"),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 10),
+    legend.text = element_text(family = "serif", size = 9),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "right",
+    legend.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+plot_data2 <- tibble(
+  clust_num = 1:195,
+  y = factor(rep(1, 195)),
+  cos_val = start_end_cos015
+)
+p2 <- ggplot(
+  data = plot_data2,
+  aes(x = clust_num, y = y, fill = cos_val)
+) +
+  geom_tile() +
+  scale_fill_gradient("",
+    low = "#a1dab4", high = "#253494",
+    na.value = "white", limits = c(0, 1), breaks = c(0, 1),
+    labels = c("Dissimilar", "Similar")
+  ) +
+  labs(
+    y = "",
+    x = paste0(
+      "Closer to center of D.C.", "<--",
+      "  Clusters ", "-->", " Further from center of D.C."
+    ),
+    caption = expression(atop(paste(
+      "\n(b) Cosine similarity when ",
+      rho[tau], " = 0.15, 195 clusters"
+    )))
+  ) +
+  theme(
+    panel.background = element_rect(fill = "transparent"),
+    plot.background = element_rect(fill = "transparent"),
+    axis.text.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 10),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.margin = unit(c(0, 0, 0, 0), "cm"),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "right",
+    legend.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+plot_data3 <- tibble(
+  clust_num = 1:373,
+  y = factor(rep(1, 373)),
+  cos_val = start_end_cos030
+)
+p3 <- ggplot(
+  data = plot_data3,
+  aes(x = clust_num, y = y, fill = cos_val)
+) +
+  geom_tile() +
+  scale_fill_gradient("",
+    low = "#a1dab4", high = "#253494",
+    na.value = "white", limits = c(0, 1), breaks = c(0, 1),
+    labels = c("Dissimilar", "Similar")
+  ) +
+  labs(
+    y = "",
+    x = paste0(
+      "Closer to center of D.C.", "<--",
+      "  Clusters ", "-->", " Further from center of D.C."
+    ),
+    caption = expression(atop(paste(
+      "\n(c) Cosine similarity when ",
+      rho[tau], " = 0.3, 373 clusters"
+    )))
+  ) +
+  theme(
+    panel.background = element_rect(fill = "transparent"),
+    plot.background = element_rect(fill = "transparent"),
+    axis.text.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks = element_blank(),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 10),
+    legend.text = element_text(family = "serif", size = 9),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "right",
+    plot.margin = unit(c(0, 0, 0, 0), "cm"),
+    legend.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- ggarrange(p1, p2, p3, ncol = 1, nrow = 3, common.legend = T, legend = "right")
+p
+```
+
+To formally compare the output of the outlier detection procedure for pick-up and drop-off usage patterns, we use cosine similarity [@Leydesdorff2005]. That is, the cosine of the angle between two vectors, where 0 represents complete dissimilarity, and 1 complete similarity.  @fig-cosine_start_end(a) provides the cosine similarity between clusters i.e. the cosine similarity of the vector of outlier severities for those detected in pick-up stations over the three year period, and that for drop-off stations. 
+
+@fig-cosine_start_end(a) shows that outliers detected in pick-up and drop-off stations are fairly similar, although this changes depending on the correlation threshold used in the clustering step. As the correlation threshold ranges from 0 to 0.3, the average cosine similarity ranges from 0.69 to 0.44. As the correlation threshold increases, the number of clusters increases. Therefore, when we look at outliers on a small cluster or station level, there is less similarity between pick-ups and drop-offs. However, when the clusters are larger and the outliers aggregated, there is a clearer pattern between pick-ups and drop-offs. Further, this similarity is not uniform across the different clusters - those closer to the centre of D.C. have a higher cosine similarity. That is, the closer a cluster is to the centre of D.C., the more likely it is that if a day is a pick-up station cluster outlier, it will also be a corresponding drop-off station cluster outlier. We did not find any temporal patterns in the comparison of pick-up and drop-off outliers. 
+
+## Weather as an explanatory factor for demand outliers {#sec-weather}
+It is widely acknowledged that weather can be used as a predictor for average bike-sharing demand [@Lin2020]. Therefore, we examine whether extreme temperature or rainfall drive extreme changes in demand i.e. outliers. To that end, we analyse weather data obtained from @VisCros and investigate whether weather can be used to explain and eventually predict the outliers in demand. The data is included in Appendix @sec-app-weather.
+
+```{r}
+#| label: fig-weather_outliers
+#| fig-cap: Severity of outliers at different temperatures and precipitation levels. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+p1 <- ggplot() +
+  geom_tile(temp_prob_plot,
+    mapping = aes(x = as.numeric(temp), y = max_prob, fill = values)
+  ) +
+  coord_cartesian(expand = F) +
+  scale_y_continuous(
+    breaks = c(0.1, 0.3, 0.5, 0.7, 0.9, 1.1),
+    labels = c(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+  ) +
+  scale_x_continuous(breaks = seq(20, 90, 5) + 2.5, labels = c("<20", seq(25, 90, 5))) +
+  scale_fill_gradient("",
+    low = "#f4de66",
+    high = "red3",
+    na.value = "lightgray",
+    limits = c(0, 1),
+    breaks = c(0, 0.5, 1),
+    labels = c(0, 0.5, 1)
+  ) +
+  labs(
+    x = "Temperature (F)",
+    y = "Maximum outlier severity\nacross clusters",
+    caption = "(a) Proportion of days classified\nas outliers"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(size = 9),
+    plot.background = element_rect(fill = "white", color = "white"),
+    panel.background = element_rect(fill = "white", color = "white"),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "white", color = "white"),
+    legend.position = "top", legend.justification = c(0.5, 0.5),
+    legend.title = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"), # top, right, bottom, left
+    axis.line = element_blank(),
+    panel.border = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p2 <- ggplot() +
+  geom_tile(rain_prob_plot,
+    mapping = aes(x = as.numeric(rain), y = max_prob, fill = values)
+  ) +
+  coord_cartesian(expand = F) +
+  scale_x_continuous(
+    breaks = c(0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5) - 0.125,
+    labels = c(
+      ">0.5", ">1.0", ">1.5", ">2.0", ">2.5",
+      ">3.0", ">3.5", ">4.0", ">4.5"
+    )
+  ) +
+  scale_y_continuous(
+    breaks = c(0.1, 0.3, 0.5, 0.7, 0.9, 1.1),
+    labels = c(0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+  ) +
+  scale_fill_gradient("",
+    low = "#eff3ff", high = "#084594",
+    na.value = "#C5D3EC",
+    limits = c(0, 1),
+    breaks = c(0, 0.5, 1),
+    labels = c(0, 0.5, 1)
+  ) +
+  labs(
+    x = "Minimum daily rainfall (in)",
+    y = "Maximum outlier severity\nacross clusters",
+    caption = "(b) Proportion of rainy days\nclassified as outliers"
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "top", legend.justification = c(0.5, 0.5),
+    legend.title = element_blank(),
+    panel.grid.major = element_blank(),
+    plot.margin = unit(c(0.2, 0.5, 0.2, 0.2), "cm"),
+    panel.grid.minor = element_blank(),
+    axis.line = element_blank(),
+    panel.border = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh", rel_widths = c(1, 1))
+p
+```
+
+@fig-weather_outliers(a) shows the proportion of days in each temperature range that have a maximum outlier severity within each severity range. Higher temperatures (between 70 and 90 $\circ$ F) result in higher severity outliers, indicated by the red region in the top right of @fig-weather_outliers(a). The red region in the bottom left shows that a high proportion of days with a very low average daily temperatures, $\leq$ 25 $\circ$ F, are classified as outliers. However, these outliers typically have a low severity. This can be explained by these outliers being negative demand outliers -- and low temperatures typically occur in winter, when demand is already low. 
+
+In addition to temperature, we also expect precipitation levels to affect demand for bike-sharing. As we expect increased rainfall to have a negative impact of usage, we consider only the severity of negative demand outliers here. @fig-weather_outliers(b) shows the proportion of days with a minimal level of precipitation which were classified as outliers with some severity. Higher rainfall generally results in higher likelihood of the day being classed as a negative demand outlier. When precipitation levels are especially high, the outliers that are detected also tend to have higher severities. 
+
+There are likely many other factors which cause and influence outlier demand in the Capital Bikeshare network. For example, @Ma2015 have previously linked usage of bike-sharing stations to usage of Metrorail services. We anticipate that cancellations, or short-term changes to Metrorail services may also generate outlier demand for bike-sharing. However, due to lack of available of data on such cancellations, we leave this to future research. 

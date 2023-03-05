@@ -1,0 +1,809 @@
+# Modelling baseline temporal usage patterns {#sec-st_patterns}
+
+As discussed in Section @sec-data, usage patterns vary across time and space. If we do not first remove temporal patterns observed in baseline demand, any outlier detection procedure will likely simply detect baseline trend characteristics as outliers. For example, there is a much higher level of variability in demand on weekends in summer. If we failed to account for this before performing the outlier detection procedure, many of the detected outliers would occur on Saturdays in the summer months. By first accounting for known temporal patterns, the detected outliers are more likely to be genuine outliers rather than explainable patterns already known to analysts. 
+
+Similarly, if we do not account for spatial baseline variability and instead aggregate data across all stations then we will simply detect unused or extremely busy stations as outliers. Conversely, if we assume all stations behave independently, then the increased noise makes it more difficult to detect outlying usage patterns. As such, before implementing the outlier detection procedure outlined later in Section @sec-outliers_method, we carry out a two-step process to (i) remove known temporal patterns; and (ii) spatially cluster stations which behave similarly. These two steps are key in identifying meaningful outliers, as we shall show.
+
+## Background: Bike-sharing demand forecasting
+Within the bike-sharing literature, a range of techniques have been considered to predict demand, both spatially and temporally. @Zhou2018 apply a Markov Chain based model to predict daily pick-ups and drop-offs at each station within the Zhongshan City bike-sharing system. The problem of predicting demand in the presence of spatial heterogeneity is further considered by @Gao2021 who estimate a distance decay function and then use multiple linear regression to predict temporal demand in the dockless bike-sharing system in Shanghai. Dockless bike-sharing systems are also discussed by @Xu2018, who use long short-term memory neural networks to predict demand, and capture the spatial and temporal imbalance in usage. @Sohrabi2021 use a combination of pattern recognition on historic data traffic patterns and $K$-nearest neighbours to make spatiotemporal demand predictions over short time horizons (between 15 minutes and 4 hours), for the Capital Bikeshare data.
+
+```{r}
+#| label: fig-residuals
+#| fig-cap: Residual usage patterns for station 31005. Figure originally included in @Rennie_thesis.
+#| fig-height: 6
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+hour_labels <- c(
+  "00:00", "", "", "", "", "", "", "",
+  "08:00", "", "", "", "", "", "", "",
+  "16:00", "", "", "", "", "", "", ""
+)
+d5 <- agg_station_matrix[[6]]
+plot_data5 <- d5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p1 <- ggplot() +
+  geom_line(
+    data = plot_data5,
+    mapping = aes(x = hour_of_day, y = count, group = date_of_day),
+    linewidth = 0.3, col = alpha("#80b1d3", 0.4)
+  ) +
+  coord_cartesian(expand = F) +
+  labs(caption = "(a) Usage patterns") +
+  scale_y_continuous(name = "Usage", limits = c(0, 22)) +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+res5 <- residuals_function(d5, c(1, 1, 1))
+plot_data5 <- res5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p2 <- ggplot() +
+  geom_line(
+    data = plot_data5,
+    mapping = aes(x = hour_of_day, y = count, group = date_of_day),
+    linewidth = 0.3, col = alpha("#80b1d3", 0.4)
+  ) +
+  coord_cartesian(expand = F) +
+  labs(caption = "(b) Residual usage patterns") +
+  scale_y_continuous(name = "Residual usage", limits = c(-6, 18)) +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+summer <- c("April", "May", "June", "July", "August", "September", "October")
+winter <- c("November", "December", "January", "February", "March")
+weekday <- c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday")
+weekend <- c("Saturday", "Sunday")
+res5 <- filter(residuals_function(d5, c(1, 1, 1)), months(date_of_day) %in% summer & weekdays(date_of_day) %in% weekday)
+plot_data5 <- res5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p3 <- ggplot() +
+  geom_line(
+    data = plot_data5,
+    mapping = aes(x = hour_of_day, y = count, group = date_of_day),
+    linewidth = 0.3, col = alpha("#80b1d3", 0.4)
+  ) +
+  coord_cartesian(expand = F) +
+  labs(caption = "(c) Summer\nweekdays") +
+  scale_y_continuous(name = "Residual usage", limits = c(-6, 18)) +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+res5 <- filter(residuals_function(d5, c(1, 1, 1)), months(date_of_day) %in% summer & weekdays(date_of_day) %in% weekend)
+plot_data5 <- res5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p4 <- ggplot() +
+  geom_line(
+    data = plot_data5,
+    mapping = aes(x = hour_of_day, y = count, group = date_of_day),
+    linewidth = 0.3, col = alpha("#80b1d3", 0.4)
+  ) +
+  coord_cartesian(expand = F) +
+  labs(caption = "(d) Summer\nweekends") +
+  scale_y_continuous(name = "Residual usage", limits = c(-6, 18)) +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+res5 <- filter(residuals_function(d5, c(1, 1, 1)), months(date_of_day) %in% winter & weekdays(date_of_day) %in% weekday)
+plot_data5 <- res5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p5 <- ggplot() +
+  geom_line(
+    data = plot_data5,
+    mapping = aes(x = hour_of_day, y = count, group = date_of_day),
+    linewidth = 0.3, col = alpha("#80b1d3", 0.4)
+  ) +
+  coord_cartesian(expand = F) +
+  labs(caption = "(e) Winter\nweekdays") +
+  scale_y_continuous(name = "Residual usage", limits = c(-6, 18)) +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+res5 <- filter(residuals_function(d5, c(1, 1, 1)), months(date_of_day) %in% winter & weekdays(date_of_day) %in% weekend)
+plot_data5 <- res5 %>% gather(hour_of_day, count, "0":"23")
+plot_data5$hour_of_day <- as.numeric(plot_data5$hour_of_day)
+p6 <- ggplot() +
+  geom_line(
+    data = plot_data5, mapping = aes(x = hour_of_day, y = count, group = date_of_day),
+    size = 0.3, col = alpha("#80b1d3", 0.4)
+  ) +
+  theme_light() +
+  coord_cartesian(expand = F) +
+  labs(caption = "(f) Winter\nweekends") +
+  scale_y_continuous(name = "Residual usage", limits = c(-6, 18)) +
+  scale_x_continuous(name = "", breaks = 0:23, labels = hour_labels) +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 10, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = "none", legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.key = element_blank()
+  )
+p_a <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh")
+p_b <- plot_grid(p3, p4, p5, p6, ncol = 4, nrow = 1, align = "vh")
+p <- plot_grid(p_a, p_b, nrow = 2, ncol = 1, align = "vh")
+p
+```
+
+The choice of forecasting approach will likely affect the outcome of outlier detection. In the following, we discuss and apply two methods of predicting the baseline temporal patterns in the data: (i) functional regression to account for changes in mean; and (ii) temporal partitioning to account for changes in variance.
+
+Beyond the model presented here, alternative approaches could be used to account for trend and seasonality, and establishing a baseline for bike-sharing demand. In general, any forecasting or modelling approach from which residuals can be obtained could be used instead. After the temporal patterns have been accounted for and the residuals obtained, we are then able to analyse the spatial correlations to group together stations which deviate from the baseline demand forecast in a similar way, as we shall discuss later in Section @sec-clustering_ch3.
+
+## Functional regression {#sec-func_reg}
+Mean daily usage patterns differ systematically across days of the week, months, and years. We apply a functional regression model [@Ramsay2009] to remove the different mean patterns. We will demonstrate this process on the daily usage patterns of station 31005 as shown in @fig-residuals(a).
+
+Let $x_{ns}(t)$ be the usage pattern for day $n$ for station $s$. We implement the following functional regression model:
+
+$$
+\begin{split}
+  x_{n,s}(t) = \beta_{0,s}(t) +
+  \textcolor{cyan}{\beta_{1,s}(t)\mathds{1}_{Mon_{n}} + \beta_{2,s}(t)\mathds{1}_{Tue_{n}} + \beta_{3,s}(t)\mathds{1}_{Wed_{n}} +} \\ \underbrace{\textcolor{cyan}{\beta_{4,s}(t)\mathds{1}_{Thu_{n}} + \beta_{5,s}(t)\mathds{1}_{Fri_{n}} + \beta_{6,s}(t)\mathds{1}_{Sat_{n}}+}}_\textrm{\textcolor{cyan}{Day}} \\ 
+  \textcolor{purple}{\beta_{7,s}(t)\mathds{1}_{Jan_{n}} + \beta_{8,s}(t)\mathds{1}_{Feb_{n}} + \beta_{9,s}(t)\mathds{1}_{Mar_{n}} +} \\
+  \textcolor{purple}{\beta_{10,s}(t)\mathds{1}_{Apr_{n}} + \beta_{11,s}(t)\mathds{1}_{May_{n}} + \beta_{12,s}(t)\mathds{1}_{Jun_{n}}+}
+  \\ 
+  \textcolor{purple}{\beta_{13,s}(t)\mathds{1}_{Jul_{n}}+\beta_{14,s}(t)\mathds{1}_{Aug_{nl}}+\beta_{15,s}(t)\mathds{1}_{Sep_{n}}+}
+  \\ 
+  \underbrace{\textcolor{purple}{
+  \beta_{16,s}(t)\mathds{1}_{Oct_{n}}+\beta_{17,s}(t)\mathds{1}_{Nov_{n}}+}}_\textrm{\textcolor{purple}{Month}} \\ 
+ \underbrace{\textcolor{blue}{\beta_{18,s}(t)\mathds{1}_{2017_{n}} + \beta_{19,s}(t)\mathds{1}_{2018_{n}}}}_\textrm{\textcolor{blue}{Year}} + e_{n,s}(t).
+\end{split}
+$$ {#eq-funcreg}
+
+where e.g., $\mathds{1}_{Mon_{n}} =1$ if day $n$ relates to a Monday, $0$ otherwise. Here, $\beta_{0,s}(t)$ represents the mean usage pattern for a Sunday in December 2019. Appendix \ref{sec-app-model_comp} contains details of the model selection process where we consider the significance of each of the factors (day, month, year) for a range of stations. The vast majority of stations select the full model containing all three factors as the best-fitting model. 
+
+As @fig-residuals(b) indicates, the core of the distribution of residuals is symmetric around 0 as desired. The majority of ``spikes'' in usage are caused by increased demand, resulting in a slight positive skew to the residual patterns. We note that the variance of these residuals is clearly not constant over time and we shall discuss this shortly. Further discussion of the residual distribution is included in Appendix @sec-app-ridges. Other features of the usage patterns including positive skew, and inter-daily correlation are discussed in Appendices @sec-app-skew and @sec-app-acf.
+
+## Temporal partitioning.
+Our functional regression approach accounts for different mean usage patterns, but it does not account for the differing inter-daily variances. The simplest option to obtain a data set with homogeneous inter-daily variance is to temporally partition the full data set. While we could partition based on each weekday, month, and year, this would result in around 4 observations per partition - an insufficient number to inform outlier detection. In deciding how to partition the data, there is a trade-off between having reasonably constant inter-daily variance within each group and ensuring there is enough data within each group in order to establish patterns. Therefore, we group together days, months, and years where the inter-daily variances are sufficiently similar. 
+
+From @fig-mean_var, it is clear that weekdays (Mon-Fri) are similar to each other, and weekends (Sat-Sun) are also similar to each other. The differences between the inter-daily variance across different months is less clear. Defining **summer** as April through to October, then months within summer exhibit similar inter-daily variance patterns, as do months within winter (November to March).  Further analysis of the variance in Appendix @sec-app-preproc supports this partitioning. All years are grouped together. This results in four partitions: (i) summer weekdays, (ii) winter weekdays, (iii) summer weekends, and (iv) winter weekends, as displayed in @fig-residuals c--f. Note that we do not attempt to remove the **intra**-daily variability of these residuals with further parametric modelling, as instead we turn to functional data analysis to detect outlying curves from these residual daily usage patterns.
+
+The choice of partition is important and should reflect the choices made in the planning process, e.g. with regard to inventory redistribution. If the increased inter-daily variance on weekends, for example, is already known and accounted for in planning, such that there are different schedules for redistribution, then partitioning as we propose would be appropriate. However, if the general planning process (including demand forecast and inventory optimisation) assumes uniformity across all days of the week, it would then be informative to do the same in the outlier detection to flag the weekend effect when it occurs.
+
+# Clustering stations by spatial usage patterns {#sec-clustering_ch3}
+
+When outlier demand is driven by factors such as regional events or weather, we expect it to affect more than a single, isolated station. At the same time, we cannot assume that all stations experience outlier demand at the same time and in the same way. Therefore, we first cluster the stations such that those in the same cluster are likely to experience similar effects from demand outliers. 
+
+We propose a two-stage process to determine which stations should be clustered. First, we construct a graph based on the geographic co-ordinates of the stations to determine which stations are permitted to be in the same cluster based on geographic distance. Secondly, we follow an idea from @Zahn1971 who suggests the removal of edges from a graph's minimum spanning tree (MST) as a method of finding clusters of nodes. 
+
+The first step of constructing the graph is non-trivial. Graph construction in the bike-sharing setting is more open-ended than in situations where mobility networks rely on established legs, as, e.g., in the railway application studied in @Rennie_thesis. For bike-sharing, direct journeys between any two stations are possible, so that in theory, all stations could be vertices in a fully connected graph. Although we could simply add edges between every node i.e. a complete graph, there are two reasons for not doing so: (i) For the purposes of aiding planning, we do not want two stations which are geographically far apart to be in the same cluster if no stations in between are similar to both. (ii) The algorithm used to compute the MST is slowed down by an increased number of edges, and due to the greedy nature of it, we are more likely to end up at a non-optimal solution if we add in extraneous edges. 
+
+## Graph construction from geographical distance.
+We first construct a graph where the nodes represent the stations and the edges indicate which stations are permitted to be in the same cluster. This approach implicitly assumes that similarity of usage is driven by the stations' geographical proximity. That is, if two stations are close together, potential customers are more likely to treat them as interchangeable, causing similar usage patterns. 
+
+In the Capital Bikeshare data set, stations are more densely distributed in the centre of D.C., so that customers can choose from a large variety of stations. We expect this to render them more sensitive to distance, such that they are less willing to travel to a more distant station. Therefore, we use different criteria to add an edge between stations depending on how close to the centre of D.C. those stations are.
+
+```{r}
+#| label: fig-mst-two
+#| fig-cap: Graph construction when $R = 5000m$, $D_{inner} = 500m$, and $D_{outer} = 1,000m$. Figure originally included in @Rennie_thesis.
+#| fig-height: 3
+#| fig-width: 6
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+stat1 <- station_data[which(station_data$LATITUDE >= 38.93 & station_data$LATITUDE <= 38.95 & station_data$LONGITUDE >= -77.08 & station_data$LONGITUDE <= -77.055), ]
+stat_in <- stat1[which(stat1$centre_distances < 5000.0), ]
+stat_out <- stat1[which(stat1$centre_distances > 5000), ]
+p1a <- ggplot() +
+  geom_polygon(
+    data = state, aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  geom_point(
+    data = station_data, aes(x = LONGITUDE, y = LATITUDE),
+    pch = 19, size = 0.4, colour = "grey"
+  ) +
+  guides(fill = FALSE) +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  labs(caption = "\n(a) Radius for defining edges\n") +
+  geom_point(
+    data = station_data, aes(x = -77.03989, y = 38.90533),
+    colour = "black", pch = 19, size = 0.4
+  ) +
+  annotate("text", x = -76.9, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.3, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  geom_segment(aes(x = -77.08, xend = -77.055, y = 38.93, yend = 38.93), colour = "black") +
+  geom_segment(aes(x = -77.055, xend = -77.08, y = 38.95, yend = 38.95), colour = "black") +
+  geom_segment(aes(x = -77.08, xend = -77.08, y = 38.93, yend = 38.95), colour = "black") +
+  geom_segment(aes(x = -77.055, xend = -77.055, y = 38.93, yend = 38.95), colour = "black") +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_blank(),
+    legend.position = "none",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = unit(c(0.3, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+circle <- fn_circle(-77.03989, 38.90533, 5000)
+p1 <- p1a +
+  geom_polygon(data = circle, aes(lon, lat), color = "red", alpha = 0)
+p2 <- ggplot() +
+  geom_polygon(data = state, aes(x = long, y = lat, group = group), fill = "white", color = "black") +
+  guides(fill = FALSE) +
+  coord_fixed(1.3, xlim = c(-77.08, -77.055), ylim = c(38.93, 38.95), expand = FALSE) +
+  labs(caption = "\n(b) Construction of graph\n") +
+  geom_polygon(data = circle, aes(lon, lat), color = "red", alpha = 0, linewidth = 1) +
+  geom_segment(aes(x = stat_in$LONGITUDE[1], y = stat_in$LATITUDE[1], xend = stat_in$LONGITUDE[5], yend = stat_in$LATITUDE[5]),
+    col = "dodgerblue2", linewidth = 1
+  ) +
+  geom_segment(aes(x = stat_in$LONGITUDE[3], y = stat_in$LATITUDE[3], xend = stat_in$LONGITUDE[4], yend = stat_in$LATITUDE[4]),
+    col = "dodgerblue2", linewidth = 1
+  ) +
+  geom_segment(aes(x = stat_out$LONGITUDE[1], y = stat_out$LATITUDE[1], xend = stat_out$LONGITUDE[2], yend = stat_out$LATITUDE[2]),
+    col = "springgreen4", linewidth = 1
+  ) +
+  geom_segment(aes(x = stat_in$LONGITUDE[1], y = stat_in$LATITUDE[1], xend = stat_out$LONGITUDE[3], yend = stat_out$LATITUDE[3]),
+    col = "springgreen4", linewidth = 1
+  ) +
+  geom_point(data = station_data, aes(x = LONGITUDE, y = LATITUDE), pch = 19, size = 2, col = "black") +
+  geom_segment(aes(x = -77.079, y = 38.932, xend = -77.075, yend = 38.932),
+    col = "dodgerblue2", linewidth = 1
+  ) +
+  geom_segment(aes(x = -77.079, y = 38.931, xend = -77.075, yend = 38.931),
+    col = "springgreen4", linewidth = 1
+  ) +
+  geom_text(
+    data = data.frame(x = c(-77.074, -77.074), y = c(38.932, 38.931), label = c("< 500m", "< 1,000m")),
+    aes(x = x, y = y, label = label),
+    hjust = 0, family = "serif", size = 3
+  ) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.title = element_blank(),
+    legend.text = element_blank(),
+    legend.position = "none",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = unit(c(0.3, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.border = element_rect(colour = "black", fill = NA, linewidth = 1),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "h")
+q <- ggdraw(p) +
+  draw_line(x = c(0.265, 0.57), y = c(0.615, 0.96), color = "black", size = 0.5) +
+  draw_line(x = c(0.265, 0.57), y = c(0.585, 0.188), color = "black", size = 0.5)
+q
+```
+
+To identify the dense city-centre, we establish a circle around the centre of D.C. of radius $R$, with the median co-ordinates of all stations as the centre, as shown in @fig-mst-two(a) with $R = 5000m$. We add an edge between stations $i$ and $j$ if: (i) both stations lie inside the radius, and are less than $D_{inner}$ apart; or (ii) one or both stations lie outside the radius $R$, and are less than $D_{outer}$ apart. 
+
+Not all stations that are geographically close exhibit similar usage patterns e.g. due to proximity to railway stations. Therefore, to quantify how similar the usage patterns of two stations are, we add weights to the edges of the graph. For each edge between stations $i$ and $j$, we also compute an edge weight representing the dissimilarity between the usage patterns for those stations. The edge weights are given by:
+
+\begin{equation}
+    w{(i, j)} = 1 - \rho(i, j),
+\end{equation}
+
+where $\rho(i, j)$ is the average functional dynamical correlation [@Dubin2005] between the daily usage patterns for stations $i$ and $j$. Here, the average correlation is based on the correlations between daily usage patterns across the entire time period considered (2017 - 2019), as there is no evidence of the clusters changing over time. However, if the correlations (and therefore clusters) are changing over time, a moving window approach could be used to update the average correlation and clusters over time. 
+
+## Minimum spanning tree clustering.
+We apply a minimum spanning tree approach to cluster stations that are connected in the geographical proximity graph. A graph's spanning tree is a subgraph that includes all vertices in the original graph and a minimum number of edges, such that the spanning tree is connected. If the original graph is disconnected, we compute a spanning tree for each component -- termed a **spanning forest**. A minimum spanning tree (MST) is the spanning tree with the minimum sum of edge weights. Since the graph is weighted, we use Prim's algorithm [@Prim1957] to calculate the MST.
+
+To obtain the clusters from the MST, we set a threshold, $\rho_{\tau}$, for the correlation and remove all edges with weights above $1 - \rho_{\tau}$. 
+
+## Clustering results: daily usage patterns {#sec-clust_output}
+
+```{r}
+#| label: fig-clust_output
+#| fig-cap: Clustering of stations under different values of $\rho_{\tau}$. Figure adapted from @Rennie_thesis.
+#| fig-height: 5
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+input_mat = adj_mat * (1-cor_mat)
+clusters <- mst_clustering_threshold(input_mat, corr_threshold=-1)
+clust1 = length(clusters$cluster_list)
+edge1 = gsize(graph_from_adjacency_matrix(clusters$adj_mat_corr, "undirected"))
+station_colour2 <- numeric(length=nrow(station_data))
+for (i in 1:nrow(station_data)){
+  k <- 1:length(clusters$cluster_list)  
+  station_colour2[i] <- length(clusters$cluster_list[[which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE)]])
+}
+station_data$station_colour2 <- station_colour2
+p0b <- ggplot() + 
+  geom_polygon(data=state,
+               aes(x=long, y=lat, group=group),
+               fill="white", color = "black") + 
+  guides(fill="none") + 
+  scale_color_gradient("Cluster\nsize", low="#bfd3e6", high="#810f7c",
+                       limits=c(0,275), breaks=c(0,250)) +
+  coord_fixed(1.3,xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  labs(caption=expression(atop(paste("\n(i) ",rho[tau]," = -1"), paste(" ")))) +
+  geom_point(data=station_data, 
+             aes(x=LONGITUDE, y=LATITUDE, colour=station_colour2), 
+             pch=19, size=0.1) + 
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        legend.key.height = unit(0.2, "cm"),
+        legend.title = element_text(family="serif", size=9, hjust=0.5),
+        legend.background = element_rect(fill="transparent"),
+        legend.position=c(0,0.25),
+        plot.caption = element_text(family="serif", size=10, hjust=0.5),
+        legend.text = element_text(family="serif", size=9, hjust=0.5),
+        plot.margin = unit(c(0.5, 0, 0, 0), "cm"),
+        axis.title.x= element_blank(),
+        axis.title.y= element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()
+  )
+clusters <- mst_clustering_threshold(input_mat, corr_threshold=0)
+clust2 = length(clusters$cluster_list)
+edge2 = gsize(graph_from_adjacency_matrix(clusters$adj_mat_corr, "undirected"))
+station_colour2 <- numeric(length=nrow(station_data))
+for (i in 1:nrow(station_data)){
+  k <- 1:length(clusters$cluster_list)  
+  station_colour2[i] <- length(clusters$cluster_list[[which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE)]])
+}
+station_data$station_colour2 <- station_colour2
+p1b <- ggplot() + 
+  geom_polygon(data=state, 
+               aes(x=long, y=lat, group=group), 
+               fill="white", color = "black") + 
+  guides(fill=FALSE) + 
+  scale_color_gradient("Cluster\nsize", low="#bfd3e6", high="#810f7c",
+                       limits=c(0,275), breaks=c(0,250)) +
+  coord_fixed(1.3,xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  labs(caption=expression(atop(paste("\n(ii) ",rho[tau]," = 0"), paste(" ")))) +
+  geom_point(data=station_data, 
+             aes(x=LONGITUDE, y=LATITUDE, colour=station_colour2), 
+             pch=19, size=0.1) +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        legend.key.height = unit(0.2, "cm"),
+        legend.title = element_text(family="serif", size=9, hjust=0.5),
+        legend.background = element_rect(fill="transparent"),
+        legend.position=c(0,0.25),
+        plot.caption = element_text(family="serif", size=10, hjust=0.5),
+        legend.text = element_text(family="serif", size=9, hjust=0.5),
+        plot.margin = unit(c(0.5, 0, 0, 0), "cm"),
+        axis.title.x= element_blank(),
+        axis.title.y= element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()
+  )
+clusters <- mst_clustering_threshold(input_mat, corr_threshold=0.15)
+clust3 = length(clusters$cluster_list)
+edge3 = gsize(graph_from_adjacency_matrix(clusters$adj_mat_corr, "undirected"))
+station_colour2 <- numeric(length=nrow(station_data))
+for (i in 1:nrow(station_data)){
+  k <- 1:length(clusters$cluster_list)  
+  station_colour2[i] <- length(clusters$cluster_list[[which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE)]])
+}
+station_data$station_colour2 <- station_colour2
+p2b <- ggplot() + 
+  geom_polygon(data=state, 
+               aes(x=long, y=lat, group=group), 
+               fill="white", color = "black") + 
+  guides(fill=FALSE) + 
+  coord_fixed(1.3,xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  scale_color_gradient("Cluster\nsize", low="#bfd3e6", high="#810f7c",
+                       limits=c(0,275), breaks=c(0,250)) +
+  labs(caption=expression(atop(paste("\n(iii) ",rho[tau]," = 0.15"), paste(" ")))) +
+  geom_point(data=station_data, aes(x=LONGITUDE, y=LATITUDE, colour=station_colour2), 
+             pch=19, size=0.1) +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        legend.key.height = unit(0.2, "cm"),
+        legend.title = element_text(family="serif", size=9, hjust=0.5),
+        legend.background = element_rect(fill="transparent"),
+        legend.position=c(0,0.25),
+        plot.caption = element_text(family="serif", size=11, hjust=0.5),
+        legend.text = element_text(family="serif", size=9, hjust=0.5),
+        plot.margin = unit(c(0.5, 0, 0, 0), "cm"),
+        axis.title.x= element_blank(),
+        axis.title.y= element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()
+  )
+clusters <- mst_clustering_threshold(input_mat, corr_threshold=0.3)
+clust4 = length(clusters$cluster_list)
+edge4 = gsize(graph_from_adjacency_matrix(clusters$adj_mat_corr, "undirected"))
+station_colour2 <- numeric(length=nrow(station_data))
+for (i in 1:nrow(station_data)){
+  k <- 1:length(clusters$cluster_list)  
+  station_colour2[i] <- length(clusters$cluster_list[[which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE)]])
+}
+station_data$station_colour2 <- station_colour2
+p3b <- ggplot() + 
+  geom_polygon(data=state, aes(x=long, y=lat, group=group), fill="white", color = "black") + 
+  guides(fill=FALSE) + 
+  coord_fixed(1.3,xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  labs(caption=expression(atop(paste("\n(iv) ",rho[tau]," = 0.3"), paste(" ")))) +
+  geom_point(data=station_data, 
+             aes(x=LONGITUDE, y=LATITUDE, colour=station_colour2), 
+             pch=19, size=0.1) +
+  scale_color_gradient("Cluster\nsize", low="#bfd3e6", high="#810f7c",
+                       limits=c(0,275), breaks=c(0,250)) +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        plot.title = element_blank(),
+        plot.subtitle = element_blank(),
+        legend.key.height = unit(0.2, "cm"),
+        legend.title = element_text(family="serif", size=9, hjust=0.5),
+        legend.background = element_rect(fill="transparent"),
+        legend.position=c(0,0.25),
+        plot.caption = element_text(family="serif", size=11, hjust=0.5),
+        legend.text = element_text(family="serif", size=9, hjust=0.5),
+        plot.margin = unit(c(0.5, 0, 0, 0), "cm"),
+        axis.title.x= element_blank(),
+        axis.title.y= element_blank(),
+        axis.text.x=element_blank(),
+        axis.text.y=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.ticks.y=element_blank(),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank()
+  )
+plot_data <- tibble::tibble(x = c(-1, 0, 0.15, 0.3),
+                            clusts = c(clust1, clust2, clust3, clust4),
+                            edgesx = c(edge1, edge2, edge3, edge4)) |> 
+  pivot_longer(cols = c(clusts, edgesx))
+p_a <- ggplot(data = plot_data,
+       mapping = aes(x = factor(x), y = value, fill = name)) +
+  geom_col(position = "dodge") +
+  labs(x = expression(atop(paste("Correlation threshold, ",rho[tau]))),
+       y = "",
+       caption = "(a) Number of clusters and edges for different thresholds") +
+  scale_fill_manual(values = c("#5ab4ac", "#d8b365"),
+                    labels = c("Number of clusters", "Number of edges")) +
+  scale_y_continuous(breaks = c(0, 250, 500)) +
+  guides(fill=guide_legend(ncol=2)) +
+  theme_minimal() +
+  theme(axis.text=element_text(family="serif", size=9),
+        axis.title.x = element_text(margin = margin(t = 10, r = 0, b = 0, l = 0)),
+        axis.title=element_text(family="serif", size=9),
+        legend.text=element_text(family="serif", size=9),
+        plot.background = element_rect(fill = "transparent", color = NA),
+        plot.margin = margin(0.1, 0.1, 0.1, 0.1, "cm"),
+        legend.background = element_rect(color = NA,fill="transparent"),
+        legend.box.background = element_rect(fill = "transparent",color=NA),
+        legend.position="top",
+        legend.title=element_blank(),
+        plot.caption=element_text(family="serif", size=10, hjust=0.5),
+        legend.key = element_blank(),
+        panel.grid.minor = element_blank())
+p_b <- p0b + p1b + p2b + p3b + plot_layout(nrow=1, ncol=4, guides = "collect") +
+  plot_annotation(caption="(b) Cluster sizes for different thresholds") &
+  theme(plot.caption=element_text(family="serif", size=11, hjust=0.5),
+        legend.position = "top")
+p <-  p_a / (p_b) +
+  plot_layout(heights = unit(c(1, 3), c('cm', 'null'))) +
+  plot_annotation(caption="(b) Cluster sizes for different thresholds") &
+  theme(plot.caption=element_text(family="serif", size=11, hjust=0.5))
+p
+```
+
+@fig-clust_output visualises the outcome from four different values of $\rho_{\tau}$. These values of $\rho_{\tau}$ are chosen to illustrate the clustering for two reasons: (i) $\rho_{\tau}=-1$ indicates that all initially connected edges stay in place. In fact, the minimum correlation observed is -0.57, and any threshold between -1 and -0.57 results in all edges of the MST remaining in place. (ii) 90% of the observed correlations lie between 0 and 0.3, therefore the values of $\rho_{\tau}$ = 0, 0.15, and 0.3 demonstrate the clustering when the threshold is close to the minimum, mean, and maximum correlations.
+
+@fig-clust_output can be used by analysts to determine the most appropriate threshold, depending on which aspect of planning they are considering. @fig-clust_output(a) shows how the number of clusters (and edges) changes with the choice of clustering threshold - with little difference seen between a threshold of -1 and 0. By inspecting which stations are clustered together, if an analyst has expert knowledge regarding which stations are likely to behave similarly, they can cross-check with the clustering and choose the threshold which supports this decision. @fig-clust_output(b) visualises the sizes the clusters that each station belongs to, demonstrating the non-uniform distribution of cluster size across the geographic area. This can also be used to determine an appropriate threshold. For example, if an analyst is interested in the general demand patterns of central D.C., they can choose a threshold that highlights all of central D.C. in a single large cluster e.g. $\rho_{\tau}$=0. In contrast, if the analyst is more interested in obtaining clusters of similar size, @fig-clust_output(b-iv) would guide them towards a higher threshold. 
+
+Across all thresholds, the stations closer to the centre of D.C. form a larger cluster, with those further away from the centre branching into smaller clusters. Clearly, the choice of threshold values $\rho_{\tau}$ impacts the precise clustering results. 
+
+The distance parameters, $\{R,D_{inner},D_{outer}\}$, also affect clustering. The number of clusters increases as $\rho_{\tau}$ or $R$ is increased, whereas increasing $D_{inner}$ or $D_{outer}$ has the opposite effect. There is an inverse relationship between the number of clusters and the uniformity of cluster size. As the number of clusters increases, individual stations tend to split off to form their own cluster whilst the majority of stations remain in the large central cluster, resulting in decreased uniformity of cluster size. For decision-making, clusters of similar sizes are often more informative (compared to a large cluster consisting of most stations, and the remaining stations each in their own cluster). 
+
+We leave the choice of parameters to analyst input, such that analysts may use their expertise to select appropriate values based on the visualisation and their business case [@Vock2021]. For the remainder of this paper, unless otherwise specified, we set the parameter values as $\rho_{\tau}$ = 0.15, $R$ = 5000m, $D_{inner}$ = 500m, and $D_{outer}$ = 1000m. These values are chosen to balance the number of clusters with more similar cluster sizes. Appendix @sec-app-cluster_params includes further details on the reasoning for these choices. 
+
+## Clustering results: daily pick-up and drop-off patterns
+So far, we have focused on clustering stations based on the similarity of their daily usage patterns. However, when considering forecasting for inventory rebalancing, differentiating pick-ups and drop-offs is highly important. Depending on the aggregation level of forecasting, it may be desirable to consider separate clusterings for drop-off and pick-up patterns. @fig-start_end shows that drop-off patterns tend to be more homogeneous, in comparison to pick-up patterns, resulting in fewer clusters for the same correlation threshold.
+
+```{r}
+#| label: fig-start_end
+#| fig-cap: Comparison of clustering stations based on pick-up and drop-off patterns for $\rho_{\tau}$=0.15, $R$ = 5000m, $D_{inner}$ = 500m, and $D_{outer}$ = 1000m. Figure adapted from @Rennie_thesis.
+#| fig-height: 4
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+input_mat <- adj_mat * (1 - all_cor_mat)
+clusters <- mst_clustering_threshold(input_mat, corr_threshold = 0.15)
+station_colour <- numeric(length = nrow(station_data))
+for (i in 1:nrow(station_data)) {
+  k <- 1:length(clusters$cluster_list)
+  station_colour[i] <- length(clusters$cluster_list[[which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE)]])
+}
+station_data$station_colour <- station_colour
+p1 <- ggplot() +
+  geom_polygon(
+    data = state, aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = FALSE) +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  labs(caption = "(a) Pick-up pattern\nstation clustering\nresulting in 320 clusters") +
+  geom_point(
+    data = station_data,
+    aes(x = LONGITUDE, y = LATITUDE, colour = station_colour),
+    pch = 19, size = 0.1
+  ) +
+  scale_color_gradient("Cluster\nsize",
+    low = "#bfd3e6",
+    high = "#810f7c", limits = c(0, 400)
+  ) +
+  annotate("text", x = -77, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.2, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.key.height = unit(0.5, "cm"),
+    legend.title = element_text(family = "serif", size = 9, hjust = 0.5),
+    legend.background = element_rect(fill = "transparent"),
+    legend.position = "top",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9, hjust = 0.5),
+    plot.margin = unit(c(0.5, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+input_mat = adj_mat * (1-cor_mat_end)
+clusters <- mst_clustering_threshold(input_mat, corr_threshold = 0.15)
+station_colour <- numeric(length = nrow(station_data))
+for (i in 1:nrow(station_data)) {
+  k <- 1:length(clusters$cluster_list)
+  station_colour[i] <- length(clusters$cluster_list[[which(sapply(k, function(x) station_data$TERMINAL_NUMBER[i] %in% clusters$cluster_list[[x]]) == TRUE)]])
+}
+station_data$station_colour <- station_colour
+p2 <- ggplot() +
+  geom_polygon(
+    data = state,
+    aes(x = long, y = lat, group = group),
+    fill = "white", color = "black"
+  ) +
+  guides(fill = FALSE) +
+  coord_fixed(1.3, xlim = c(-77.4, -76.8), ylim = c(38.7, 39.15), expand = FALSE) +
+  labs(caption = "(b) Drop-off pattern\nstation clustering\nresulting in 168 clusters") +
+  geom_point(
+    data = station_data,
+    aes(x = LONGITUDE, y = LATITUDE, colour = station_colour),
+    pch = 19, size = 0.1
+  ) +
+  scale_color_gradient("Cluster\nsize", low = "#bfd3e6", high = "#810f7c", limits = c(0, 400)) +
+  annotate("text", x = -77, y = 39.1, label = "MARYLAND", size = 3, fontface = 2) +
+  annotate("text", x = -77.2, y = 38.75, label = "VIRGINIA", size = 3, fontface = 2) +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    plot.background = element_rect(fill = "white"),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    legend.key.height = unit(0.5, "cm"),
+    legend.title = element_text(family = "serif", size = 9, hjust = 0.5),
+    legend.background = element_rect(fill = "transparent"),
+    legend.position = "top",
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9, hjust = 0.5),
+    plot.margin = unit(c(0.5, 0, 0, 0), "cm"),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.x = element_blank(),
+    axis.text.y = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.ticks.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+p <- p1 + p2 + plot_layout(nrow = 1, guides = "collect") &
+  theme(legend.position = "top")
+p
+```
+
+```{r}
+#| label: fig-start_end_nmi
+#| fig-cap: Comparison of pick-up and drop-off station clustering. Figure adapted from @Rennie_thesis.
+#| fig-height: 3
+#| echo: false
+#| message: false
+#| warning: false
+#| eval: true
+#| cache: true
+input_mat <- adj_mat * (1 - all_cor_mat)
+input_mat_end <- adj_mat * (1 - cor_mat_end)
+thresholds <- seq(-1, 1, 0.05)
+nmi <- numeric(length(thresholds))
+num_start <- numeric(length(thresholds))
+num_end <- numeric(length(thresholds))
+for (i in 1:length(thresholds)) {
+  clusters <- mst_clustering_threshold(input_mat, corr_threshold = thresholds[i])
+  clusters_end <- mst_clustering_threshold(input_mat_end, corr_threshold = thresholds[i])
+  class <- as.numeric(unlist(sapply(1:length(clusters$cluster_list), function(x) rep(x, length(clusters$cluster_list[[x]])))))
+  class_end <- as.numeric(unlist(sapply(1:length(clusters_end$cluster_list), function(x) rep(x, length(clusters_end$cluster_list[[x]])))))
+  nmi[i] <- compare(comm1 = class, comm2 = class_end, method = "nmi")
+  num_start[i] <- length(clusters$cluster_list)
+  num_end[i] <- length(clusters_end$cluster_list)
+}
+d <- data.frame(x = thresholds, y1 = num_start, y2 = num_end)
+p1 <- ggplot(data = d, aes(x = x)) +
+  geom_line(aes(y = y1, colour = "Start terminal"), linewidth = 0.5) +
+  geom_line(aes(y = y2, colour = "End terminal"), linewidth = 0.5) +
+  labs(
+    x = "Correlation threshold",
+    y = "Number of clusters",
+    caption = "(a) Number of clusters for pick-up\nand drop-off station clustering"
+  ) +
+  ylim(0, 600) +
+  scale_colour_manual("",
+    values = c(
+      "Start terminal" = "#FFA500",
+      "End terminal" = "springgreen4"
+    ),
+    breaks = c("Start terminal", "End terminal"),
+    labels = c("Pick-ups", "Drop-offs")
+  ) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    plot.margin = margin(0.1, 0.3, 0.1, 0.1, "cm"),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0, 1), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    legend.key = element_blank()
+  )
+d <- data.frame(x = thresholds, y1 = nmi)
+p2 <- ggplot(data = d, aes(x = x)) +
+  geom_line(aes(y = y1), linewidth = 0.5) +
+  annotate("text", x = 1, y = 0.2, label = "More clusters", size = 3, hjust = 1) +
+  annotate("segment",
+    x = 0.7, xend = 1, y = 0.4,
+    yend = 0.4, linewidth = 0.5, arrow = arrow(length = unit(2, "mm"))
+  ) +
+  annotate("text", x = -1, y = 0.2, label = "Fewer clusters", size = 3, hjust = 0) +
+  annotate("segment",
+    x = -0.7, xend = -1, y = 0.4,
+    yend = 0.4, linewidth = 0.5, arrow = arrow(length = unit(2, "mm"))
+  ) +
+  labs(
+    x = "Correlation threshold",
+    y = "Normalised mutual\ninformation",
+    caption = "(b) NMI for pick-up and\ndrop-off station clustering"
+  ) +
+  ylim(0, 1) +
+  theme_light() +
+  theme(
+    axis.text = element_text(family = "serif", size = 9),
+    axis.title.x = element_text(margin = margin(t = 5, r = 0, b = 0, l = 0)),
+    axis.title.y = element_text(margin = margin(t = 0, r = 5, b = 0, l = 0)),
+    axis.title = element_text(family = "serif", size = 9),
+    plot.caption = element_text(family = "serif", size = 10, hjust = 0.5),
+    legend.text = element_text(family = "serif", size = 9),
+    plot.margin = margin(0.1, 0.3, 0.1, 0.1, "cm"),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    legend.background = element_rect(color = NA, fill = "transparent"),
+    legend.box.background = element_rect(fill = "transparent", color = NA),
+    legend.position = c(0, 1), legend.justification = c(0, 1),
+    legend.title = element_blank(),
+    legend.key = element_blank()
+  )
+p <- plot_grid(p1, p2, ncol = 2, nrow = 1, align = "vh")
+p
+```
+
+@fig-start_end_nmi(a) shows that this increased homogeneity of drop-off patterns is consistent across all values of the correlation threshold, $\rho_{\tau}$. Although the number of clusters resulting from both pick-up and drop-off station clustering follows a similar relationship with the correlation threshold -- increasing steeply between 0 and 0.4 -- the drop-off clustering consistently results in fewer clusters. 
+
+To formally compare the output of these two clusterings, we use the normalised mutual information (NMI) [@Amelio2015]. The NMI is 1 if two clusterings are identical, and 0 if they are completely different (see Appendix @sec-app-nmi_def_ch3 for details). @fig-start_end_nmi(b) shows that the similarity of the pick-up and drop-off clusterings are highly dependent on the correlation threshold. When a low threshold is used, the clusterings are completely different. However, as the correlation threshold increases above 0.25, the clusterings become more similar, achieving an NMI of around 0.75. 
+
+This evidence that pick-ups and drop-offs are not spatially homogeneous motivates the need for separate forecasting of the two. The differences across the varying threshold also indicates that the need for separate forecasting is more critical when considering a larger area i.e. when considering total demand, but is less critical over smaller areas closer to the station level. Monitoring the difference in the number of clusters and the similarity of the two clusterings can help analysts to decide on the level of forecasting. Analysts could also examine changes in the NMI over time for a given correlation threshold. For example, if the pick-up and drop-off clusterings are becoming more similar to each other over time, this could indicate increasing levels of homogeneity in pick-up patterns.

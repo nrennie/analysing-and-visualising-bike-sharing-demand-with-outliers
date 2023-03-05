@@ -1,0 +1,172 @@
+---
+title: "Analysing and visualising bike-sharing demand with outliers"
+date: ""
+execute: 
+  warning: false
+  message: false
+format:
+  arxiv-pdf:
+    cite-method: natbib
+    keep-tex: true
+    tbl-cap-location: bottom
+    include-in-header: setup.tex
+    bibliography: references.bib
+    number-sections: true
+    link-citations: true
+    documentclass: article
+    citecolor: blue
+    linkcolor: blue
+    papersize: a4
+    appendix-style: plain
+    linestretch: 1.1
+crossref:
+  sec-prefix: ""
+author:
+  - name: Nicola RENNIE
+    email: "n.rennie@lancaster.ac.uk"
+    affiliations:
+      - name: Lancaster University
+        department: STOR-i Centre for Doctoral Training
+        city: Lancaster
+        country: UK
+        postal-code: "LA1 4YW"
+  - name: Catherine CLEOPHAS*
+    email: "cleophas@bwl.uni-kiel.de"
+    note: "* Corresponding author"
+    affiliations:
+      - name: Christian-Albrechts-University Kiel
+        department: Institute for Business
+        city: Kiel
+        country: Germany
+        postal-code: "24118"
+  - name: Adam M. SYKULSKI
+    email: "adam.sykulski@imperial.ac.uk"
+    affiliations:
+      - name: Imperial College London
+        department: Dept. of Mathematics
+        city: London
+        country: UK
+        postal-code: "SW7 2AZ"
+  - name: Florian DOST
+    email: "florian.dost@b-tu.de"
+    affiliations:
+      - name: Brandenburg University of Technology
+        department: Institute of Business and Economics
+        city: Cottbus
+        country: Germany
+        postal-code: "03046"
+abstract: |
+    Bike-sharing is a popular component of sustainable urban mobility. It requires anticipatory planning, e.g. of station locations and inventory, to balance expected demand and capacity. However, external factors such as extreme weather or glitches in public transport, can cause demand to deviate from baseline levels. Identifying such outliers keeps historic data reliable and improves forecasts. In this paper we show how outliers can be identified by clustering stations and applying a functional depth analysis. We apply our analysis techniques to the Washington D.C. Capital Bikeshare data set as the running example throughout the paper, but our methodology is general by design. Furthermore, we offer an array of meaningful visualisations to communicate findings and highlight patterns in demand. Last but not least, we formulate managerial recommendations on how to use both the demand forecast and the identified outliers in the bike-sharing planning process.
+    
+    **Keywords:** Analytics; Forecasting; Outlier detection; Data visualisation. 
+---
+
+```{r}
+#| label: load-packages
+#| echo: false 
+#| message: false
+#| eval: true
+library(changepoint)
+library(cowplot)
+library(geosphere)
+library(ggplot2)
+library(ggpubr)
+library(ggridges)
+library(ICSNP)
+library(igraph)
+library(kableExtra)
+library(lubridate)
+library(MASS)
+library(moments)
+library(mrfDepth)
+library(patchwork)
+library(POT)
+library(tidyverse)
+library(zoo)
+library(extraDistr)
+```
+
+```{r}
+#| label: load-data
+#| echo: false 
+#| message: false
+#| eval: true
+#| cache: true
+agg_cluster_output_beta_hm <- readRDS("Data/agg_cluster_output_beta_hm.rds")
+adj_mat <- readRDS("Data/adj_mat2b.rds")
+agg_results_beta <- readRDS("Data/agg_results_beta.rds")
+agg_results_reg <- readRDS("Data/agg_results_reg.rds")
+agg_station_matrix <- readRDS("Data/agg_station_matrix.rds")
+agg_station_output <- readRDS("Data/agg_station_output_beta.rds")
+agg_station_pos_neg <- readRDS("Data/agg_station_pos_neg.rds")
+all_cor_mat <- readRDS("Data/cor_mat.rds")
+cor_mat <- readRDS("Data/agg_cor_mat.rds")
+cor_mat_end <- readRDS("Data/cor_mat_end.rds")
+d1 <- readRDS("Data/OD1.rds")
+d2 <- readRDS("Data/OD2.rds")
+d3 <- readRDS("Data/OD3.rds")
+dist <- readRDS("Data/dist.rds")
+exceedances <- readRDS("Data/exceedances.rds")
+log_agg_station_pos_neg <- readRDS("Data/log_agg_station_pos_neg.rds")
+num_clusts_c <- readRDS("Data/num_clusts_c.rds")
+num_clusts_D_i <- readRDS("Data/num_clusts_D_i.rds")
+num_clusts_D_o <- readRDS("Data/num_clusts_D_o.rds")
+num_clusts_R <- readRDS("Data/num_clusts_R.rds")
+rain_matrix <- readRDS("Data/rain_matrix.rds")
+rain_prob_plot <- readRDS("Data/rain_prob_plot.rds")
+regression_weekday <- readRDS("Data/regression_weekday.rds")
+regression_month <- readRDS("Data/regression_month.rds")
+sdcs_c <- readRDS("Data/sdcs_c.rds")
+sdcs_D_i <- readRDS("Data/sdcs_D_i.rds")
+sdcs_D_o <- readRDS("Data/sdcs_D_o.rds")
+sdcs_R <- readRDS("Data/sdcs_R.rds")
+start_end_cos000 <- readRDS("Data/start_end_cos000.rds")
+start_end_cos015 <- readRDS("Data/start_end_cos015.rds")
+start_end_cos030 <- readRDS("Data/start_end_cos030.rds")
+station_data <- readRDS("Data/station_data_new.rds")
+temp_matrix <- readRDS("Data/temp_matrix.rds")
+temp_prob_plot <- readRDS("Data/temp_prob_plot.rds")
+```
+
+```{r}
+#| label: load-functions
+#| echo: false
+#| message: false
+#| eval: true
+source("Functions/c_dist_centre.R")
+source("Functions/depth.R")
+source("Functions/depth_threshold.R")
+source("Functions/estBetaParams.R")
+source("Functions/fn_circle.R")
+source("Functions/merge_differences.R")
+source("Functions/mst_clustering.R")
+source("Functions/residuals_function.R")
+state <- map_data("state")
+```
+
+{{< include introduction.qmd >}}
+
+{{< include data.qmd >}}
+
+{{< include st_patterns.qmd >}}
+
+{{< include outlier_detection.qmd >}}
+
+{{< include discussion.qmd >}}
+
+{{< include conclusion.qmd >}}
+
+{{< include acknowledgements.qmd >}}
+
+{{< include appendix.qmd >}} 
+
+
+
+
+
+
+
+
+
+
+
